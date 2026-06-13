@@ -2,7 +2,7 @@
 // @name         Evades.io - Balls & Effects Overlay v6.2
 // @namespace    https://evades.io/
 // @version      6.2
-// @description  Fixed overlay
+// @description  Visuals for displaying balls and effects in Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
 // @run-at       document-end
@@ -13,7 +13,6 @@
     'use strict';
 
     // ==================== НАСТРОЙКИ ГРАФИКИ ====================
-    const SCALE = 1.5;
     const STROKE_WIDTH = 2;
     const GHOST_ALPHA = 0.13;
     const HARMLESS_ALPHA = 0.13;
@@ -125,10 +124,6 @@
     let isHideSelfEnabled = false;
     let isUIVisible = true;
     let isExtrapolationEnabled = true;
-
-    let overlay = null;
-    let overlayContainer = null;
-    let ctx = null;
 
     let currentArea = null;
     let originalProps = new Map();
@@ -721,21 +716,6 @@
         }
     }
 
-   // ==================== ИНТЕРФЕЙС И КНОПКИ ====================
-    function createOverlay() {
-        /*if (overlay) return;
-        overlayContainer = document.createElement('div');
-        overlayContainer.id = 'BallsOverlayContainer';
-        overlayContainer.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 999998; overflow: hidden;';
-        document.body.appendChild(overlayContainer);
-
-        overlay = document.createElement('canvas');
-        overlay.id = 'BallsOverlay';
-        overlay.style.cssText = `position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; transform-origin: center center; transform: scale(${SCALE});`;
-        overlayContainer.appendChild(overlay);
-        ctx = overlay.getContext('2d');*/
-    }
-
     function createBtn(bottom, text, color, onClick) {
         const btn = document.createElement('div');
         btn.style.cssText = `position: fixed; bottom: ${bottom}px; left: 10px; background: rgba(0,0,0,0.85); color: ${color}; font-family: monospace; font-size: 11px; padding: 6px 10px; border-radius: 6px; z-index: 1000000; cursor: pointer; border: 1px solid ${color}; user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;`;
@@ -749,7 +729,6 @@
 
     const overlayBtn = createBtn(60, '🎨 OVERLAY [ON]', '#0f0', () => {
         isOverlayEnabled = !isOverlayEnabled;
-        if (overlayContainer) overlayContainer.style.display = isOverlayEnabled ? 'block' : 'none';
         overlayBtn.innerHTML = `🎨 OVERLAY [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
         overlayBtn.style.borderColor = isOverlayEnabled ? '#0f0' : '#f00';
     });
@@ -795,9 +774,4 @@
     });
 
     setInterval(runRenderHook, 32);
-
-    setTimeout(() => {
-        createOverlay();
-        console.log(`[Script v6] Оверлей с поддержкой Gloop и предикта камеры активирован.`);
-    }, 1000);
 })();
