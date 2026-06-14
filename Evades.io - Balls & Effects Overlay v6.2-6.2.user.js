@@ -85,7 +85,7 @@
 
     // ==================== MSG EVENT LOGIC FUNCTIONS ====================
     window._client.input = (msg) => {
-        //console.log("input", msg);
+        //console.log("Input", msg);
 
         if (msg.sequence) {
             window._client.seqQueue.push([msg.sequence, +new Date()]);
@@ -115,6 +115,10 @@
     window._client.onMessage = (msg) => {
         if (!msg.entities) msg.entities = [];
 
+        /*if (lastSeq != msg.sequence) {
+            console.log("Output", msg)
+            lastSeq = msg.sequence
+        }*/
         let me = msg?.globalEntities?.find(e => e.id === window._client.user?.self?.id);
 
         if (me) {
@@ -125,24 +129,19 @@
                     y: me.y,
                     time: performance.now()
                 };
-
-                if (window._client.selfCmdHistory) {
-                    window._client.selfCmdHistory = window._client.selfCmdHistory.filter(
-                        cmd => cmd.seq > msg.sequence
-                    );
-                }
-                if (window._client.selfCmdHistory.length > 10) {
-                    console.log(window._client.selfCmdHistory, msg.sequence);
-                }
             }
         }
 
+        if (window._client.selfCmdHistory) {
+            window._client.selfCmdHistory = window._client.selfCmdHistory.filter(
+                cmd => cmd.seq > msg.sequence
+            );
+        }
         let _seq = window._client.seqQueue.find(q => q[0] === msg.sequence);
         if (_seq) {
             window._client.ping = +new Date() - _seq[1];
             window._client.seqQueue = window._client.seqQueue.filter(q => q[0] > msg.sequence);
         }
-
 
         if (msg.pong) return; // Skip ping messages
         if (!isOverlayEnabled) return
@@ -184,7 +183,6 @@
 
     // ==================== CONFIG & GLOBALS FOR PREDICTION ====================
     const config = {
-        predMsBuffer: 50,
         bounceDetectAngle: Math.PI * 0.6,
         enemyEmaAlpha: 0.15,
         enemyStoppedMs: 300,
@@ -229,8 +227,8 @@
     function updateEnemyPrediction(enemies) {
         const SERVER_TICK_MS = 1000 / 60;
         const now = performance.now();
-        const pingMs = (typeof window._client?.ping === 'number' && window._client.ping > 0) ? window._client.ping : 95;
-        const predMs = pingMs * 0.5 + config.predMsBuffer;
+        const tickDelay = window._client.seqQueue ? window._client.seqQueue.length : 0;
+        const predMs = tickDelay * SERVER_TICK_MS;
 
         for (const e of enemies) {
             if (!e._evadeLastPos) {
@@ -479,13 +477,14 @@
             if (game.area && game.area.zones) {
                 bounceZones = typeof game.area.zones.list === 'function'
                     ? game.area.zones.list()
-                : (Array.isArray(game.area.zones) ? game.area.zones : []);
+                    : (Array.isArray(game.area.zones) ? game.area.zones : []);
             }
-        } catch (e) {}
+        } catch (e) { }
 
         // 3. Calculate prediction time
-        const pingMs = (typeof window._client?.ping === 'number' && window._client.ping > 0) ? window._client.ping : 95;
-        const predMs = pingMs * 0.5 + config.predMsBuffer;
+        const SERVER_TICK_MS = 1000 / 60;
+        const tickDelay = window._client.seqQueue ? window._client.seqQueue.length : 0;
+        const predMs = tickDelay * SERVER_TICK_MS;
 
         // 4. Precompute trajectories with bouncing
         precomputeTrajectories(enemies, predMs, bounceZones);
@@ -795,6 +794,7 @@
         nativeCtx.lineWidth = playerStrokeWidth;
         nativeCtx.stroke();
     }
+
     // ========== 5. СИНХРОННЫЕ МОДИФИКАТОРЫ ВИДИМОСТИ ==========
     function updateSelfVisibility(game) {
         const gameState = game?.gameState;
