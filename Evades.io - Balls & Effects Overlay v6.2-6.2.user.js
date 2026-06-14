@@ -183,13 +183,10 @@
 
     // ==================== CONFIG & GLOBALS FOR PREDICTION ====================
     const config = {
-        bounceDetectAngle: Math.PI * 0.6,
+        bounceDetectAngle: Math.PI / 3,
         enemyEmaAlpha: 0.15,
         enemyStoppedMs: 300,
         bounceSimStepMs: 12,
-        wallMargin: 5,
-        playerEmaAlpha: 0.15,
-        playerStoppedMs: 300
     };
 
     const ENEMY_TYPE_WALL = 229;
@@ -331,8 +328,15 @@
             if (onRight) clockwise = (vy > 0); else if (onLeft) clockwise = (vy < 0);
         }
 
-        if (onTop) y = bTop; if (onBottom) y = bBottom;
-        if (onLeft) x = bLeft; if (onRight) x = bRight;
+        if (vx !== 0) {
+            // Moving horizontally: snap Y to horizontal wall (perpendicular to movement)
+            if (onTop) y = bTop;
+            if (onBottom) y = bBottom;
+        } else {
+            // Moving vertically: snap X to vertical wall (perpendicular to movement)
+            if (onLeft) x = bLeft;
+            if (onRight) x = bRight;
+        }
 
         const points = [{ t: 0, x, y }];
         for (let t = stepMs; t <= maxTimeMs; t += stepMs) {
