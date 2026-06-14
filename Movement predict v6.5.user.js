@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Movement predict v6.4.1
+// @name         Movement predict v6.5
 // @namespace    https://evades.io/
-// @version      6.4.1
-// @description  Fixed mouse movement being incorrect on other resolutions
+// @version      6.5
+// @description  Restored exact sandbox physics (independent axis clipping)
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
 // @run-at       document-end
@@ -40,6 +40,8 @@
     let playerVx = 0;
     let playerVy = 0;
     let lastPlayerVelocityTime = performance.now();
+    let playerVxHistory = [];
+    let playerVyHistory = [];
 
     // Отслеживание мыши и Shift в реальном времени
     let currentMouseX = window.innerWidth / 2;
@@ -153,7 +155,6 @@
         const dt = (now - lastAuraCheckTime) / 1000;
         const isValidDt = dt > 0.005 && dt < 0.5;
 
-        // Обход сущностей с получением ключа id (строка), совпадающего с ключами в __originalEffects
         for (const [entId, ent] of Object.entries(entities)) {
             if (!ent || ent === player) continue;
 
@@ -194,7 +195,6 @@
             let repulsionForce = (ent.repulsion !== undefined) ? ent.repulsion : (6 / 32);
             let currentAuraSize = 0;
 
-            // Используем сохранённые эффекты, если оригиналы скрыты оверлеем
             const effs = (window.__originalEffects && window.__originalEffects.has(entId))
                 ? window.__originalEffects.get(entId)
                 : (ent.effects && ent.effects.effects ? ent.effects.effects : null);
@@ -277,22 +277,24 @@
         const camera = game?.camera;
 
         // ================= ДИНАМИЧЕСКИЙ ПРЕДИКТ-ТИК ПО ПИНГУ =================
-        let avgPing = 0;
-        if (game.gameState?.performanceStats?.pingSamples) {
-            const samples = game.gameState.performanceStats.pingSamples;
-            if (samples.length >= 5) {
-                const lastFive = samples.slice(-5);
-                const sum = lastFive.reduce((s, sample) => s + sample.value, 0);
-                avgPing = sum / 5;
-                const ticksFromPing = avgPing / 16.66;
-                const newTicks = Math.ceil(ticksFromPing);
-                if (newTicks >= 1) {
-                    PREDICT_TICKS = newTicks;
-                }
-            }
+
+        if (!window.__predictTickHistory) {
+            window.__predictTickHistory = [];
         }
 
-        // Рассчитываем собственную скорость изменения координат игрока (надежный трекер)
+        const currentTicks = window._client.selfCmdHistory.length;
+
+        window.__predictTickHistory.push(currentTicks);
+
+        if (window.__predictTickHistory.length > 15) {
+            window.__predictTickHistory.shift();
+        }
+
+        const sorted = [...window.__predictTickHistory].sort((a, b) => a - b);
+
+        PREDICT_TICKS = sorted[Math.floor(sorted.length / 2)];
+
+        // Рассчитываем собственную скорость изменения координат игрока
         const nowTime = performance.now();
         const pDt = (nowTime - lastPlayerVelocityTime) / 1000;
         const isValidPDt = pDt > 0.005 && pDt < 0.5;
@@ -312,6 +314,15 @@
         lastPlayerX = pX;
         lastPlayerY = pY;
         lastPlayerVelocityTime = nowTime;
+
+        // Запись истории скоростей для усреднения в дебаге
+        playerVxHistory.push(playerVx);
+        playerVyHistory.push(playerVy);
+        if (playerVxHistory.length > 60) playerVxHistory.shift();
+        if (playerVyHistory.length > 60) playerVyHistory.shift();
+
+        const avgPlayerVx = playerVxHistory.reduce((s, v) => s + v, 0) * 2 / playerVxHistory.length;
+        const avgPlayerVy = playerVyHistory.reduce((s, v) => s + v, 0) * 2 / playerVyHistory.length;
 
         const isDead = player.isDead || player.dead || (player.deathTimer !== undefined && player.deathTimer !== -1);
         const hasMouseControl = !!(game.gameState && game.gameState.mouseDown);
@@ -334,6 +345,8 @@
         if (isDead || !hasMouseControl || isVoid) {
             predictedStepsX = [];
             predictedStepsY = [];
+            playerVxHistory = [];
+            playerVyHistory = [];
 
             entityVelocities.clear();
             lastAuraCheckTime = performance.now();
@@ -348,7 +361,7 @@
             poisonSniperTimer = 0;
 
             if (isDebugVisible) {
-                updateDebugUI(0, 0, 0, 0, isVoid, false, player.voidTime || 0, player.isIced === true, isMagmaxAbilityActive, false, 0, mouseDistFullStrength, 0, currentDist, 0, 0, avgPing, PREDICT_TICKS);
+                updateDebugUI(0, 0, 0, 0, isVoid, false, player.voidTime || 0, player.isIced === true, isMagmaxAbilityActive, false, 0, mouseDistFullStrength, 0, currentDist, 0, 0, PREDICT_TICKS, 0, 0, 0, 0, 0, 0);
             }
             return { x: pX, y: pY };
         }
@@ -523,10 +536,6 @@
             distanceMovement *= 0.5;
         }
 
-        if (isDebugVisible) {
-            updateDebugUI(baseSpeed, additionalSpeed, finalMovementSpeed, effectiveSlow, isVoid, (zoneFriction === 0), player.voidTime || 0, player.isIced === true, isMagmaxAbilityActive, isNightActive, maxPoisonTicks, mouseDistFullStrength, distanceMovement, currentDist, aura.pullX, aura.pullY, avgPing, PREDICT_TICKS);
-        }
-
         let d_x = 0;
         let d_y = 0;
 
@@ -539,22 +548,41 @@
         }
 
         if (zoneFriction > 0) {
-            const frictionFactor = 1 - zoneFriction;
 
-            d_x = distanceMovement * Math.cos(mouseAngle);
-            d_y = distanceMovement * Math.sin(mouseAngle);
+            function frictionAxis(component, speed, friction) {
+                const abs = Math.abs(component);
 
-            let slide_x = prevMoved[0] * frictionFactor;
-            let slide_y = prevMoved[1] * frictionFactor;
+                if (abs >= friction) {
+                    return Math.sign(component) * speed;
+                }
 
-            d_x += slide_x;
-            d_y += slide_y;
+                const factor = abs / friction;
 
-            const currentSpeedMagnitude = Math.hypot(d_x, d_y);
-            const maxAllowed = Math.max(distanceMovement, currentIceSpeed);
-            if (currentSpeedMagnitude > maxAllowed && currentSpeedMagnitude > 0) {
-                d_x = (d_x / currentSpeedMagnitude) * maxAllowed;
-                d_y = (d_y / currentSpeedMagnitude) * maxAllowed;
+                return Math.sign(component) * speed * factor;
+            }
+
+            const cosA = Math.cos(mouseAngle);
+            const sinA = Math.sin(mouseAngle);
+
+            d_x = frictionAxis(cosA, distanceMovement, zoneFriction);
+            d_y = frictionAxis(sinA, distanceMovement, zoneFriction);
+
+            // Независимый клип по осям как в игре
+            let abs_d_x = Math.abs(d_x);
+            let abs_d_y = Math.abs(d_y);
+
+            if (abs_d_x < 0.001) d_x = 0;
+            if (abs_d_y < 0.001) d_y = 0;
+
+            abs_d_x = Math.abs(d_x);
+            abs_d_y = Math.abs(d_y);
+
+            if (abs_d_x > distanceMovement) {
+                d_x *= distanceMovement / abs_d_x;
+            }
+
+            if (abs_d_y > distanceMovement) {
+                d_y *= distanceMovement / abs_d_y;
             }
         } else {
             const prevMagnitude = Math.hypot(prevMoved[0], prevMoved[1]);
@@ -568,17 +596,15 @@
             }
         }
 
-        let stepX = (d_x / 32) * timeFix;
-        let stepY = (d_y / 32) * timeFix;
+        let stepX = (d_x / 32) * timeFix * 1.066; //1.066 to match prediction speed with ingame speed
+        let stepY = (d_y / 32) * timeFix * 1.066;
 
-        // Интегрируем суммарный импульс аур в текущий тик предикта камеры
         stepX += aura.pullX * timeFix;
         stepY += aura.pullY * timeFix;
 
         predictedStepsX.push(stepX);
         predictedStepsY.push(stepY);
 
-        // Ограничиваем длину истории согласно PREDICT_TICKS
         while (predictedStepsX.length > PREDICT_TICKS) {
             predictedStepsX.shift();
             predictedStepsY.shift();
@@ -651,7 +677,18 @@
             }
         }
 
-        // Экспорт для оверлея
+        if (isDebugVisible) {
+            let moveAngle = 0;
+            if (Math.hypot(avgPlayerVx, avgPlayerVy) > 0.05) {
+                moveAngle = Math.atan2(avgPlayerVy, avgPlayerVx) * (180 / Math.PI);
+                if (moveAngle < 0) moveAngle += 360;
+            }
+            let targetAngle = mouseAngle * (180 / Math.PI);
+            if (targetAngle < 0) targetAngle += 360;
+
+            updateDebugUI(baseSpeed, additionalSpeed, finalMovementSpeed, effectiveSlow, isVoid, (zoneFriction === 0), player.voidTime || 0, player.isIced === true, isMagmaxAbilityActive, isNightActive, maxPoisonTicks, mouseDistFullStrength, distanceMovement, currentDist, aura.pullX, aura.pullY, PREDICT_TICKS, avgPlayerVx, avgPlayerVy, stepX * 2, stepY * 2, moveAngle, targetAngle);
+        }
+
         window.__predictData = {
             x: finalX,
             y: finalY,
@@ -661,8 +698,7 @@
         return { x: finalX, y: finalY };
     }
 
-    // Функция обновления дебаг-панели (без console.log)
-    function updateDebugUI(base, add, final, slow, voidState, slipperyState, voidTicks, isIced, magmaxActive, nightActive, poisonTicks, maxMouseDist, cursorSpeed, currentDist, pullX, pullY, avgPing, dynamicTicks) {
+    function updateDebugUI(base, add, final, slow, voidState, slipperyState, voidTicks, isIced, magmaxActive, nightActive, poisonTicks, maxMouseDist, cursorSpeed, currentDist, pullX, pullY, dynamicTicks, avgVx, avgVy, predVx, predVy, moveAngle, targetAngle) {
         const pullMag = Math.hypot(pullX, pullY);
         debugDiv.innerHTML = `
             <b style="color: #fff;">[CAMERA PREDICT DEBUG]</b><br>
@@ -673,9 +709,14 @@
             <span style="color: #aaa;">--- CURSOR & DYNAMICS ---</span><br>
             Max Mouse R:<span style="color: #ff99ff;"> ${maxMouseDist.toFixed(0)}px</span><br>
             Real Speed: <span style="color: #ffff00; font-weight: bold;">${cursorSpeed.toFixed(2)}</span><br>
+            Vel X (60t):<span style="color: #33ffcc;"> ${avgVx.toFixed(2)}</span><br>
+            Vel Y (60t):<span style="color: #33ffcc;"> ${avgVy.toFixed(2)}</span><br>
+            Pred X (x2):<span style="color: #ffcc66;"> ${predVx.toFixed(2)}</span><br>
+            Pred Y (x2):<span style="color: #ffcc66;"> ${predVy.toFixed(2)}</span><br>
             Mouse Dist: <span style="color: #ff9999;">${currentDist.toFixed(1)}px</span><br>
+            Target Ang: <span style="color: #ff9933;">${targetAngle.toFixed(1)}°</span><br>
+            Move Angle: <span style="color: #ff55bb; font-weight: bold;">${moveAngle.toFixed(1)}°</span><br>
             <span style="color: #aaa;">--- CONNECTION ---</span><br>
-            Avg Ping:   <span style="color: #ffff00;">${avgPing.toFixed(1)} ms</span><br>
             Pred. Ticks:<span style="color: #ffff00;">${dynamicTicks}</span><br>
             <span style="color: #aaa;">----------------------</span><br>
             Eff. Slow:  <span style="color: ${slow > 0 ? '#ff3333' : '#00ff66'};">${(slow * 100).toFixed(0)}%</span><br>
