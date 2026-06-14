@@ -43,80 +43,125 @@
         return true;
     }
 
-    // ==================== БАЗА ЦВЕТОВ АУР (True Type) ====================
-    const TARGET_AURAS = new Set([45, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 61, 62, 63, 64, 65, 66, 67, 70, 71]);
+    // ==================== Main Input / Output Hook ====================
+    window._client = window._client || {};
+    Object.assign(window._client, {
+        seqQueue: [],
+        selfCmdHistory: [],
+        selfAcked: null,
+        ping: 0,
+    });
 
-    const AURA_COLORS = {
-        0: { fill: "rgba(255, 80, 10, 0.15)", stroke: null },
-        1: { fill: "rgba(200, 70, 0, 0.15)", stroke: null },
-        2: { fill: "rgba(77, 233, 242, 0.2)", stroke: null },
-        3: { fill: "rgba(255, 0, 0, 0.2)", stroke: null },
-        4: { fill: "rgba(255, 255, 0, 0.2)", stroke: null },
-        5: { fill: "rgba(153, 62, 6, 0.2)", stroke: null },
-        6: { fill: "rgba(76, 240, 161, 0.25)", stroke: "rgba(51, 161, 118, 0.25)" },
-        7: { fill: "rgba(142, 129, 38, 0.15)", stroke: "rgba(104, 95, 28, 0.15)" },
-        8: { fill: "rgba(174, 137, 185, 0.25)", stroke: null },
-        9: { fill: "rgba(225, 225, 0, 0.1)", stroke: null },
-        10: { fill: "rgba(0, 0, 0, 0.2)", stroke: null },
-        13: { fill: "rgba(255, 128, 189, 0.25)", stroke: null },
-        14: { fill: "rgba(161, 132, 70, 0.2)", stroke: null },
-        16: { fill: "rgba(109, 109, 255, 0.2)", stroke: null },
-        18: { fill: "rgba(255, 250, 134, 0.15)", stroke: null },
-        19: { fill: "rgba(146, 107, 227, 0.15)", stroke: null },
-        20: { fill: "rgba(97, 97, 97, 0.2)", stroke: null },
-        21: { fill: "rgba(228, 0, 0, 0.15)", stroke: null },
-        22: { fill: "rgba(254, 0, 0, 0.15)", stroke: null },
-        23: { fill: "rgba(0, 200, 255, 0.15)", stroke: null },
-        24: { fill: "rgba(60, 0, 114, 0.15)", stroke: null },
-        25: { fill: "rgba(210, 228, 238, 0.2)", stroke: null },
-        26: { fill: "rgba(58, 116, 112, 0.3)", stroke: null },
-        27: { fill: "rgba(33, 161, 164, 0.3)", stroke: null },
-        28: { fill: "rgba(254, 191, 206, 0.5)", stroke: null },
-        29: { fill: "rgba(77, 1, 98, 0.3)", stroke: null },
-        30: { fill: "rgba(0, 198, 0, 0.2)", stroke: null },
-        31: { fill: "rgba(189, 103, 209, 0.25)", stroke: null },
-        32: { fill: "rgba(100, 35, 115, 0.3)", stroke: null },
-        33: { fill: "rgba(246, 131, 6, 0.3)", stroke: null },
-        34: { fill: "rgba(107, 84, 30, 0.3)", stroke: null },
-        35: { fill: "rgba(152, 153, 153, 0.2)", stroke: null },
-        36: { fill: "rgba(41, 254, 198, 0.3)", stroke: null },
-        37: { fill: "rgba(45, 50, 54, 0.15)", stroke: null },
-        38: { fill: "rgba(59, 0, 0, 0.2)", stroke: null },
-        39: { fill: "rgba(190, 82, 19, 0.3)", stroke: null },
-        41: { fill: "rgba(38, 18, 53, 0.15)", stroke: null },
-        42: { fill: "rgba(117, 38, 86, 0.15)", stroke: null },
-        43: { fill: "rgba(60, 189, 152, 0.2)", stroke: null },
-        44: { fill: "rgba(207, 166, 236, 0.25)", stroke: null },
-        45: { fill: "rgba(99, 93, 110, 0.35)", stroke: null },
-        46: { fill: "rgba(110, 57, 30, 0.15)", stroke: null },
-        47: { fill: "rgba(0, 225, 225, 0.1)", stroke: null },
-        48: { fill: "rgba(255, 0, 0, 0.15)", stroke: null },
-        49: { fill: "rgba(0, 0, 255, 0.15)", stroke: null },
-        50: { fill: "rgba(60, 0, 115, 0.15)", stroke: null },
-        51: { fill: "rgba(210, 228, 239, 0.2)", stroke: null },
-        52: { fill: "rgba(58, 117, 112, 0.3)", stroke: null },
-        53: { fill: "rgba(33, 161, 165, 0.3)", stroke: null },
-        54: { fill: "rgba(255, 191, 206, 0.5)", stroke: null },
-        55: { fill: "rgba(60, 0, 0, 0.2)", stroke: null },
-        56: { fill: "rgba(77, 1, 99, 0.3)", stroke: null },
-        57: { fill: "rgba(0, 199, 0, 0.2)", stroke: null },
-        58: { fill: "rgba(189, 103, 210, 0.25)", stroke: null },
-        59: { fill: "rgba(100, 35, 116, 0.3)", stroke: null },
-        60: { fill: "rgba(247, 131, 6, 0.3)", stroke: null },
-        61: { fill: "rgba(146, 107, 227, 0.3)", stroke: null },
-        62: { fill: "rgba(214, 0, 57, 0.3)", stroke: null },
-        63: { fill: "rgba(108, 84, 30, 0.3)", stroke: null },
-        64: { fill: "rgba(153, 153, 153, 0.2)", stroke: null },
-        65: { fill: "rgba(41, 255, 198, 0.3)", stroke: null },
-        66: { fill: "rgba(45, 50, 55, 0.15)", stroke: null },
-        67: { fill: "rgba(191, 82, 19, 0.3)", stroke: null },
-        68: { fill: "rgba(170, 47, 47, 0.48)", stroke: null },
-        69: { fill: "rgba(70, 65, 66, 0.17)", stroke: null },
-        70: { fill: "rgba(117, 38, 86, 0.15)", stroke: null },
-        71: { fill: "rgba(38, 18, 53, 0.15)", stroke: null },
-        72: { fill: "rgba(255, 128, 0, 0.15)", stroke: null },
-        73: { fill: "rgba(0, 255, 0, 0.6)", stroke: null }
+
+    let _obs = new MutationObserver((ev) => {
+        let elem = Array.from(document.querySelectorAll('script')).filter(a => a.type === "module" && a.src.match(/\/index\.[0-9a-f]{8}\.js/))[0];
+        if (!elem) return;
+        let src = elem.src
+
+        if (!navigator.userAgent.includes("Firefox")) elem.remove()
+
+        let req = new XMLHttpRequest()
+        req.open("GET", src, false)
+        req.send()
+        let code = req.response
+        code = code
+            .replace(/processServerMessage\(([^)]+)\)\{/, (m, msgVar) => `processServerMessage(${msgVar}){
+        try {
+            window._client && window._client.onMessage && window._client.onMessage(${msgVar});
+        } catch(e){}`)
+
+            .replace(/ag\.emit\(([^)]+)\)/, (m, msgVar) => `(window._client && window._client.input && window._client.input(${msgVar}), ag.emit(${msgVar}))`)
+
+        let nScr = document.createElement("script")
+        nScr.setAttribute("type", "module")
+        nScr.innerHTML = code
+        document.body.appendChild(nScr)
+
+        console.log("Init")
+        _obs.disconnect()
+
+    })
+    _obs.observe(document, { childList: true, subtree: true });
+
+    // ==================== MSG EVENT LOGIC FUNCTIONS ====================
+    window._client.input = (msg) => {
+        //console.log("input", msg);
+
+        if (msg.sequence) {
+            window._client.seqQueue.push([msg.sequence, +new Date()]);
+
+            if (msg.mouseDown && msg.mouseDown.updated) {
+                window._client.selfCmdHistory = window._client.selfCmdHistory || [];
+                window._client.selfCmdHistory.push({
+                    seq: msg.sequence,
+                    x: msg.mouseDown.x,
+                    y: msg.mouseDown.y,
+                    time: performance.now()
+                });
+
+                if (window._client.selfCmdHistory.length > 20) {
+                    window._client.selfCmdHistory.shift();
+                }
+            }
+        }
+
+        return msg;
     };
+
+    let lastSeq = -1;
+    let lastPong = -1;
+    let lastPongTime = Date.now();
+
+    window._client.onMessage = (msg) => {
+        if (!msg.entities) msg.entities = [];
+
+        let me = msg?.globalEntities?.find(e => e.id === window._client.user?.self?.id);
+
+        if (me) {
+            if (msg.sequence != null && typeof me.x === 'number' && typeof me.y === 'number') {
+                window._client.selfAcked = {
+                    seq: msg.sequence,
+                    x: me.x,
+                    y: me.y,
+                    time: performance.now()
+                };
+
+                if (window._client.selfCmdHistory) {
+                    window._client.selfCmdHistory = window._client.selfCmdHistory.filter(
+                        cmd => cmd.seq > msg.sequence
+                    );
+                }
+                if (window._client.selfCmdHistory.length > 10) {
+                    console.log(window._client.selfCmdHistory, msg.sequence);
+                }
+            }
+        }
+
+        let _seq = window._client.seqQueue.find(q => q[0] === msg.sequence);
+        if (_seq) {
+            window._client.ping = +new Date() - _seq[1];
+            window._client.seqQueue = window._client.seqQueue.filter(q => q[0] > msg.sequence);
+        }
+
+
+        if (msg.pong) return; // Skip ping messages
+        if (!isOverlayEnabled) return
+        // --- Clean up injected predicted enemies when area changes ---
+        if (msg.area) {
+            const game = getGameRef();
+            if (game?.gameState?.entities) {
+                for (const id of Object.keys(game.gameState.entities)) {
+                    // If the ID is a negative number (as a string), it's one of our clones
+                    if (Number(id) < 0) {
+                        delete game.gameState.entities[id];
+                    }
+                }
+            }
+        }
+
+        injectEnemies(msg);
+    };
+
 
     // ==================== УПРАВЛЕНИЕ ХУКАМИ ====================
     let isOverlayEnabled = true;
@@ -127,10 +172,32 @@
 
     let currentArea = null;
     let originalProps = new Map();
+
+    let originalVisibility = new Map();
+    let originalEffectVisibility = new Map();
+
     let originalSelfProps = null;
     let ballVelocities = new Map();
     let ballAuras = new Map();
     let gloopOriginalRenders = new Map();   // сохранение оригинальных render для Gloop
+
+
+    // ==================== CONFIG & GLOBALS FOR PREDICTION ====================
+    const config = {
+        predMsBuffer: 50,
+        bounceDetectAngle: Math.PI * 0.6,
+        enemyEmaAlpha: 0.15,
+        enemyStoppedMs: 300,
+        bounceSimStepMs: 12,
+        wallMargin: 5,
+        playerEmaAlpha: 0.15,
+        playerStoppedMs: 300
+    };
+
+    const ENEMY_TYPE_WALL = 229;
+    const _walkableTypeSet = new Set([0, 4, 6]);
+
+    let _plLastPos = null, _plLastTime = 0, _plVxMs = 0, _plVyMs = 0;
 
     // ========== 1. ХУК ДВИЖКА QUESTS-LAUNCHER ЧЕРЕЗ FIBER ==========
     function getGameRef() {
@@ -155,9 +222,323 @@
                 fiber = fiber.return;
                 depth++;
             }
-        } catch (e) {}
+        } catch (e) { }
         return null;
     }
+
+    function updateEnemyPrediction(enemies) {
+        const SERVER_TICK_MS = 1000 / 60;
+        const now = performance.now();
+        const pingMs = (typeof window._client?.ping === 'number' && window._client.ping > 0) ? window._client.ping : 95;
+        const predMs = pingMs * 0.5 + config.predMsBuffer;
+
+        for (const e of enemies) {
+            if (!e._evadeLastPos) {
+                e._evadeLastPos = { x: e.x, y: e.y };
+                e._evadeLastTime = now;
+                e._vxMs = 0;
+                e._vyMs = 0;
+                e._speedMs = 0;
+                e._fx = e.x;
+                e._fy = e.y;
+                e._predX = e.x;
+                e._predY = e.y;
+                continue;
+            }
+
+            const moved = (e.x !== e._evadeLastPos.x || e.y !== e._evadeLastPos.y);
+            if (moved) {
+                const wallClockDt = now - e._evadeLastTime;
+                const numTicks = Math.max(1, Math.round(wallClockDt / SERVER_TICK_MS));
+                const effectiveDt = numTicks * SERVER_TICK_MS;
+
+                if (effectiveDt > 0.5) {
+                    const rawVxMs = (e.x - e._evadeLastPos.x) / effectiveDt;
+                    const rawVyMs = (e.y - e._evadeLastPos.y) / effectiveDt;
+                    const rawSpeed = Math.hypot(rawVxMs, rawVyMs);
+
+                    if (rawSpeed > 1.5) {
+                        e._vxMs = 0;
+                        e._vyMs = 0;
+                        e._trajectory = null;
+                        e._trajValid = false;
+                    } else {
+                        const emaSpeed = Math.hypot(e._vxMs, e._vyMs);
+                        let isBounce = false;
+
+                        if (rawSpeed > 0.001 && emaSpeed > 0.001) {
+                            const dot = (rawVxMs * e._vxMs + rawVyMs * e._vyMs) / (rawSpeed * emaSpeed);
+                            const angleDiff = Math.acos(Math.max(-1, Math.min(1, dot)));
+                            isBounce = angleDiff > config.bounceDetectAngle;
+                        }
+
+                        if (isBounce) {
+                            e._vxMs = rawVxMs;
+                            e._vyMs = rawVyMs;
+                            e._trajectory = null;
+                        } else {
+                            e._vxMs = e._vxMs * (1 - config.enemyEmaAlpha) + rawVxMs * config.enemyEmaAlpha;
+                            e._vyMs = e._vyMs * (1 - config.enemyEmaAlpha) + rawVyMs * config.enemyEmaAlpha;
+                        }
+                    }
+
+                    e._evadeLastPos.x = e.x;
+                    e._evadeLastPos.y = e.y;
+                    e._evadeLastTime = now;
+                }
+            } else if (now - e._evadeLastTime > config.enemyStoppedMs) {
+                e._vxMs = 0;
+                e._vyMs = 0;
+            }
+
+            e._speedMs = Math.hypot(e._vxMs, e._vyMs);
+            const msSinceTick = now - e._evadeLastTime;
+            e._fx = e.x + (e._vxMs || 0) * msSinceTick;
+            e._fy = e.y + (e._vyMs || 0) * msSinceTick;
+
+            e._predX = e._fx + e._vxMs * predMs;
+            e._predY = e._fy + e._vyMs * predMs;
+        }
+    }
+
+    function simulateWallHuggingTrajectory(e, maxTimeMs, bounceZones) {
+        const stepMs = config.bounceSimStepMs || 16;
+        const eR = e.radius;
+        let x = e.x, y = e.y;
+        let vx = e._vxMs || 0, vy = e._vyMs || 0;
+
+        if (Math.abs(vx) < 1e-7 && Math.abs(vy) < 1e-7) return [{ t: 0, x, y }, { t: maxTimeMs, x, y }];
+
+        let zone = null;
+        for (const z of bounceZones) {
+            if (x >= z.x && x <= z.x + z.width && y >= z.y && y <= z.y + z.height) { zone = z; break; }
+        }
+        if (!zone) return [{ t: 0, x, y }, { t: maxTimeMs, x: x + vx * maxTimeMs, y: y + vy * maxTimeMs }];
+
+        const bLeft = zone.x + eR, bRight = zone.x + zone.width - eR;
+        const bTop = zone.y + eR, bBottom = zone.y + zone.height - eR;
+        const speed = Math.hypot(vx, vy);
+
+        if (Math.abs(vx) >= Math.abs(vy)) { vx = Math.sign(vx || 1) * speed; vy = 0; }
+        else { vy = Math.sign(vy || 1) * speed; vx = 0; }
+
+        const tol = Math.max(eR * 0.5, 8);
+        const onTop = Math.abs(y - bTop) < tol, onBottom = Math.abs(y - bBottom) < tol;
+        const onLeft = Math.abs(x - bLeft) < tol, onRight = Math.abs(x - bRight) < tol;
+
+        let clockwise = true;
+        if (vx !== 0) {
+            if (onTop) clockwise = (vx > 0); else if (onBottom) clockwise = (vx < 0);
+        } else {
+            if (onRight) clockwise = (vy > 0); else if (onLeft) clockwise = (vy < 0);
+        }
+
+        if (onTop) y = bTop; if (onBottom) y = bBottom;
+        if (onLeft) x = bLeft; if (onRight) x = bRight;
+
+        const points = [{ t: 0, x, y }];
+        for (let t = stepMs; t <= maxTimeMs; t += stepMs) {
+            let remaining = speed * stepMs, iter = 0;
+            while (remaining > 0.01 && iter++ < 4) {
+                const dx = vx !== 0 ? Math.sign(vx) : 0;
+                const dy = vy !== 0 ? Math.sign(vy) : 0;
+                let wallDist = Infinity;
+                if (dx > 0) wallDist = bRight - x; else if (dx < 0) wallDist = x - bLeft;
+                else if (dy > 0) wallDist = bBottom - y; else if (dy < 0) wallDist = y - bTop;
+                if (wallDist < 0) wallDist = 0;
+
+                if (remaining <= wallDist + 0.001) {
+                    x += dx * remaining; y += dy * remaining; remaining = 0;
+                } else {
+                    x += dx * wallDist; y += dy * wallDist; remaining -= wallDist;
+                    if (dx > 0) x = bRight; else if (dx < 0) x = bLeft;
+                    else if (dy > 0) y = bBottom; else if (dy < 0) y = bTop;
+
+                    if (clockwise) { const ov = vx; vx = -vy; vy = ov; }
+                    else { const ov = vx; vx = vy; vy = -ov; }
+                }
+            }
+            points.push({ t, x, y });
+        }
+        return points;
+    }
+
+    function simulateEnemyTrajectory(e, maxTimeMs, bounceZones) {
+        if (e.entityType === ENEMY_TYPE_WALL) return simulateWallHuggingTrajectory(e, maxTimeMs, bounceZones);
+
+        const eR = e.radius;
+        let x = e.x, y = e.y, vx = e._vxMs || 0, vy = e._vyMs || 0;
+
+        if (Math.abs(vx) < 1e-7 && Math.abs(vy) < 1e-7) return [{ t: 0, x, y }, { t: maxTimeMs, x, y }];
+
+        let zone = null;
+        for (const z of bounceZones) {
+            if (x >= z.x && x <= z.x + z.width && y >= z.y && y <= z.y + z.height) { zone = z; break; }
+        }
+        if (!zone) return [{ t: 0, x, y }, { t: maxTimeMs, x: x + vx * maxTimeMs, y: y + vy * maxTimeMs }];
+
+        const bLeft = zone.x + eR, bRight = zone.x + zone.width - eR;
+        const bTop = zone.y + eR, bBottom = zone.y + zone.height - eR;
+
+        x = Math.max(bLeft, Math.min(bRight, x));
+        y = Math.max(bTop, Math.min(bBottom, y));
+        if (x <= bLeft && vx < 0) vx = -vx; if (x >= bRight && vx > 0) vx = -vx;
+        if (y <= bTop && vy < 0) vy = -vy; if (y >= bBottom && vy > 0) vy = -vy;
+
+        const stepMs = config.bounceSimStepMs || 12;
+        const points = [{ t: 0, x, y }];
+
+        for (let t = stepMs; t <= maxTimeMs; t += stepMs) {
+            let remaining = stepMs, iter = 0;
+            while (remaining > 0.001 && iter++ < 6) {
+                let tBounce = remaining;
+                if (vx < 0) { const tw = (bLeft - x) / vx; if (tw > 1e-6 && tw < tBounce) tBounce = tw; }
+                else if (vx > 0) { const tw = (bRight - x) / vx; if (tw > 1e-6 && tw < tBounce) tBounce = tw; }
+                if (vy < 0) { const tw = (bTop - y) / vy; if (tw > 1e-6 && tw < tBounce) tBounce = tw; }
+                else if (vy > 0) { const tw = (bBottom - y) / vy; if (tw > 1e-6 && tw < tBounce) tBounce = tw; }
+
+                x += vx * tBounce; y += vy * tBounce; remaining -= tBounce;
+
+                if (remaining > 0.001) {
+                    if (x <= bLeft || x >= bRight) { vx = -vx; x = Math.max(bLeft, Math.min(bRight, x)); }
+                    if (y <= bTop || y >= bBottom) { vy = -vy; y = Math.max(bTop, Math.min(bBottom, y)); }
+                }
+            }
+            points.push({ t, x, y });
+        }
+        return points;
+    }
+
+    function interpolateTrajectory(traj, timeMs) {
+        if (!traj || traj.length === 0) return null;
+        if (timeMs <= 0) return { x: traj[0].x, y: traj[0].y };
+        const last = traj[traj.length - 1];
+        if (timeMs >= last.t) return { x: last.x, y: last.y };
+
+        let lo = 0, hi = traj.length - 1;
+        while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (traj[mid].t <= timeMs) lo = mid; else hi = mid; }
+
+        const a = traj[lo], b = traj[hi];
+        const dt = b.t - a.t;
+        if (dt < 1e-6) return { x: a.x, y: a.y };
+        const u = (timeMs - a.t) / dt;
+        return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
+    }
+
+    function precomputeTrajectories(enemies, maxTimeMs, walkableZones) {
+        const now = performance.now();
+        for (const e of enemies) {
+            e._trajectory = simulateEnemyTrajectory(e, maxTimeMs, walkableZones);
+            e._trajMeta = {
+                computeTime: now, computeX: e.x, computeY: e.y,
+                fxOffsetMs: e._evadeLastTime ? (now - e._evadeLastTime) : 0,
+                vx: e._vxMs || 0, vy: e._vyMs || 0
+            };
+
+            e._trajValid = true;
+            if (e._trajectory && e._trajectory.length > 1) {
+                const last = e._trajectory[e._trajectory.length - 1];
+                let inAnyZone = false;
+                for (const z of walkableZones) {
+                    if (last.x >= z.x && last.x <= z.x + z.width && last.y >= z.y && last.y <= z.y + z.height) { inAnyZone = true; break; }
+                }
+                if (!inAnyZone && e.entityType !== 234) {
+                    e._trajValid = false;
+                    e._vxMs = 0; e._vyMs = 0; e._trajectory = null;
+                }
+            }
+        }
+    }
+
+
+    const injectEnemies = (msg) => {
+        const game = getGameRef();
+        if (!game?.gameState?.entities) return;
+        const gameState = game.gameState;
+
+        if (!msg.entities) msg.entities = [];
+        const now = performance.now();
+
+        const enemies = [];
+        for (const [id, ent] of Object.entries(gameState.entities)) {
+            if (Number(id) < 0) continue; // Don't process injected clones
+            if (!ent.isEnemy) continue;
+            if (ent.nick !== undefined || ent.entityType === 118 || ent.entityType === 113 || ent.entityType === 130) continue;
+            if ((ent.name || '').toLowerCase().includes('switch')) continue;
+            if (ent.entityType === 136) continue; // Fixed typo from `entity` to `ent`
+            if (typeof ent.x !== 'number' || typeof ent.y !== 'number' || !ent.radius) continue;
+
+            enemies.push(ent);
+        }
+        // 1. Update velocities and linear predictions
+        updateEnemyPrediction(enemies);
+
+        // 2. Get zones for bouncing simulation
+        let bounceZones = [];
+        try {
+            if (game.area && game.area.zones) {
+                bounceZones = typeof game.area.zones.list === 'function'
+                    ? game.area.zones.list()
+                : (Array.isArray(game.area.zones) ? game.area.zones : []);
+            }
+        } catch (e) {}
+
+        // 3. Calculate prediction time
+        const pingMs = (typeof window._client?.ping === 'number' && window._client.ping > 0) ? window._client.ping : 95;
+        const predMs = pingMs * 0.5 + config.predMsBuffer;
+
+        // 4. Precompute trajectories with bouncing
+        precomputeTrajectories(enemies, predMs, bounceZones);
+
+        // 5. Inject clones (only if moving and extrapolation is on)
+        for (const [id, ent] of Object.entries(gameState.entities)) {
+            const numericId = Number(id);
+            if (isNaN(numericId) || numericId < 0) continue; // Skip clones here
+
+            const hasVelocity = Math.abs(ent._vxMs) > 0.0001 || Math.abs(ent._vyMs) > 0.0001;
+
+            if (isExtrapolationEnabled && hasVelocity) {
+                let predX, predY;
+
+                // Use trajectory if valid, otherwise fallback to linear prediction
+                if (ent._trajValid && ent._trajectory) {
+                    const trajPos = interpolateTrajectory(ent._trajectory, predMs);
+                    if (trajPos) {
+                        predX = trajPos.x;
+                        predY = trajPos.y;
+                    } else {
+                        predX = ent._predX;
+                        predY = ent._predY;
+                    }
+                } else {
+                    predX = ent._predX;
+                    predY = ent._predY;
+                }
+
+                const clone = Object.assign({}, ent, {
+                    id: -numericId,
+                    x: predX,
+                    y: predY,
+                    isDestroyed: false,
+                });
+
+                // Use stored effects if available (before radius was set to 0), otherwise copy current
+                const storedProps = originalProps.get(id);
+                if (storedProps && storedProps.effectsData) {
+                    clone.effects = ent.effects ? JSON.parse(JSON.stringify(ent.effects)) : {};
+                    clone.effects.effects = JSON.parse(JSON.stringify(storedProps.effectsData));
+                } else if (ent.effects) {
+                    try {
+                        clone.effects = JSON.parse(JSON.stringify(ent.effects));
+                    } catch (e) {
+                        clone.effects = ent.effects;
+                    }
+                }
+
+                msg.entities.push(clone);
+            }
+        }
+    };
 
     // ========== 2. ДИНАМИЧЕСКИЙ РАСЧЕТ СКОРОСТИ ==========
     function getBallTrackedState(id, currentX, currentY, now, type) {
@@ -215,24 +596,6 @@
             state.updatedAt = now;
         }
         return state;
-    }
-
-    function getZoneBounds(x, y, area) {
-        if (area && area.zones) {
-            try {
-                const zonesList = typeof area.zones.list === 'function' ? area.zones.list() : (Array.isArray(area.zones) ? area.zones : []);
-                for (const zone of zonesList) {
-                    if (x >= zone.x && x <= zone.x + zone.width &&
-                        y >= zone.y && y <= zone.y + zone.height) {
-                        return { minX: zone.x, maxX: zone.x + zone.width, minY: zone.y, maxY: zone.y + zone.height };
-                    }
-                }
-            } catch (e) {}
-        }
-        if (area && area.width && area.height) {
-            return { minX: 0, maxX: area.width, minY: 0, maxY: area.height };
-        }
-        return null;
     }
 
     // ========== СБОР АУР И ОФФСЕТОВ GLOOP ==========
@@ -348,14 +711,6 @@
         return balls;
     }
 
-    function getStrokeColor(ball) {
-        if (ball.type === 136) return 'transparent';
-        if (ball.isType52) return 'transparent';
-        if ([74, 227, 228, 229].includes(ball.type)) return 'white';
-        if (ball.color === '#000000' || ball.color === '#222222' || ball.isDripping) return 'white';
-        return 'black';
-    }
-
     // ========== 4. ОТРИСОВКА ==========
     function drawBalls(nativeCtx, game, camera, now) {
         const gameState = game.gameState;
@@ -370,11 +725,7 @@
                 const lastFive = samples.slice(-5);
                 const sum = lastFive.reduce((s, sample) => s + sample.value, 0);
                 const avgPing = sum / 5;
-                const ticksFromPing = avgPing / 16.66;
-                const newTicks = Math.ceil(ticksFromPing + 1);
-                if (newTicks >= 0) {
-                    EXTRAPOLATION_TICKS = newTicks;
-                }
+                window._client.ping = avgPing
             }
         }
 
@@ -390,124 +741,6 @@
                 x: (wx - left) * scale,
                 y: (wy - top) * scale
             };
-        }
-
-        for (const ball of balls) {
-            const state = ball.trackedState;
-            if (!state) continue;
-
-            if (!state.lastFrameAt) state.lastFrameAt = now;
-            const frameDt = Math.min(0.1, (now - state.lastFrameAt) / 1000);
-            state.lastFrameAt = now;
-
-            let targetX = ball.rawX;
-            let targetY = ball.rawY;
-            const timeSincePacket = Math.min(0.1, (now - state.updatedAt) / 1000);
-
-            if (ball.type === 199 || ball.type === 207) {
-                state.visualX = ball.rawX;
-                state.visualY = ball.rawY;
-            } else {
-                if (isExtrapolationEnabled && ball.hasVelocity) {
-                    const totalPredictionSec = timeSincePacket + (EXTRAPOLATION_TICKS * TICK_MS / 1000);
-                    targetX += state.vx * totalPredictionSec;
-                    targetY += state.vy * totalPredictionSec;
-                } else if (ball.hasVelocity) {
-                    targetX += state.vx * timeSincePacket;
-                    targetY += state.vy * timeSincePacket;
-                }
-
-                const bounds = getZoneBounds(ball.rawX, ball.rawY, game.area);
-                if (bounds) {
-                    const radius = ball.radius || 0;
-                    if (canBounce(ball.type)) {
-                        if (targetX - radius < bounds.minX) {
-                            targetX = bounds.minX + radius + (bounds.minX - (targetX - radius));
-                        } else if (targetX + radius > bounds.maxX) {
-                            targetX = bounds.maxX - radius - ((targetX + radius) - bounds.maxX);
-                        }
-                        if (targetY - radius < bounds.minY) {
-                            targetY = bounds.minY + radius + (bounds.minY - (targetY - radius));
-                        } else if (targetY + radius > bounds.maxY) {
-                            targetY = bounds.maxY - radius - ((targetY + radius) - bounds.maxY);
-                        }
-                    } else if (DEFAULT_PROJECTILES.has(ball.type)) {
-                        let hitWall = false;
-                        if (targetX - radius < bounds.minX) { targetX = bounds.minX + radius; hitWall = true; }
-                        else if (targetX + radius > bounds.maxX) { targetX = bounds.maxX - radius; hitWall = true; }
-                        if (targetY - radius < bounds.minY) { targetY = bounds.minY + radius; hitWall = true; }
-                        else if (targetY + radius > bounds.maxY) { targetY = bounds.maxY - radius; hitWall = true; }
-                        if (hitWall) {
-                            state.vx = 0;
-                            state.vy = 0;
-                            ball.hasVelocity = false;
-                        }
-                    }
-                }
-
-                if (Math.hypot(targetX - state.visualX, targetY - state.visualY) > 200) {
-                    state.visualX = targetX;
-                    state.visualY = targetY;
-                } else {
-                    const k = 25;
-                    const lerpFactor = Math.min(1, k * frameDt);
-                    state.visualX += (targetX - state.visualX) * lerpFactor;
-                    state.visualY += (targetY - state.visualY) * lerpFactor;
-                }
-
-                if (bounds && (canBounce(ball.type) || DEFAULT_PROJECTILES.has(ball.type))) {
-                    const radius = ball.radius || 0;
-                    if (state.visualX - radius < bounds.minX) state.visualX = bounds.minX + radius;
-                    if (state.visualX + radius > bounds.maxX) state.visualX = bounds.maxX - radius;
-                    if (state.visualY - radius < bounds.minY) state.visualY = bounds.minY + radius;
-                    if (state.visualY + radius > bounds.maxY) state.visualY = bounds.maxY - radius;
-                }
-            }
-
-            // Convert to screen coordinates
-            const screen = worldToScreen(state.visualX, state.visualY);
-            const screenRadius = Math.max(3, ball.radius * scale);
-
-            // Draw auras
-            const auras = ballAuras.get(ball.id);
-            if (auras) {
-                for (const [auraIdStr, auraRadius] of Object.entries(auras)) {
-                    const auraId = parseInt(auraIdStr, 10);
-                    let colorConfig = AURA_COLORS[auraId];
-                    if (!colorConfig) {
-                        colorConfig = { fill: "rgba(255, 0, 150, 0.25)", stroke: "rgba(255, 0, 150, 0.8)" };
-                    }
-                    nativeCtx.save();
-                    nativeCtx.globalAlpha = 1.0;
-                    nativeCtx.beginPath();
-                    nativeCtx.arc(screen.x, screen.y, auraRadius * scale, 0, Math.PI * 2);
-                    if (colorConfig.fill) {
-                        nativeCtx.fillStyle = colorConfig.fill;
-                        nativeCtx.fill();
-                    }
-                    if (colorConfig.stroke) {
-                        nativeCtx.strokeStyle = colorConfig.stroke;
-                        nativeCtx.lineWidth = 1.5;
-                        nativeCtx.stroke();
-                    }
-                    nativeCtx.restore();
-                }
-            }
-
-            // Draw ball
-            const strokeColor = getStrokeColor(ball);
-            nativeCtx.save();
-            nativeCtx.globalAlpha = ball.alpha;
-            nativeCtx.beginPath();
-            nativeCtx.arc(screen.x, screen.y, screenRadius, 0, Math.PI * 2);
-            nativeCtx.fillStyle = ball.color;
-            nativeCtx.fill();
-            if (strokeColor !== 'transparent') {
-                nativeCtx.strokeStyle = strokeColor;
-                nativeCtx.lineWidth = STROKE_WIDTH;
-                nativeCtx.stroke();
-            }
-            nativeCtx.restore();
         }
 
         // --- 2. Отрисовка кусочков Gloop с привязкой к предикту камеры ---
@@ -561,12 +794,7 @@
         nativeCtx.strokeStyle = playerStrokeColor;
         nativeCtx.lineWidth = playerStrokeWidth;
         nativeCtx.stroke();
-
-        if (typeof extrapolateBtn !== 'undefined') {
-            extrapolateBtn.innerHTML = `🔮 ${EXTRAPOLATION_TICKS} TICKS [${isExtrapolationEnabled ? 'ON' : 'OFF'}]`;
-        }
     }
-
     // ========== 5. СИНХРОННЫЕ МОДИФИКАТОРЫ ВИДИМОСТИ ==========
     function updateSelfVisibility(game) {
         const gameState = game?.gameState;
@@ -587,7 +815,9 @@
         const selfId = game.gameState.selfId;
 
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113 || entity.id === selfId) continue;
+            if (id < 0) continue; // Skip our injected clones safely!
+
+            if (!entity.isEnemy || entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113 || entity.id === selfId || entity.isPlayer) continue;
             if (entity.entityType === 130 || (entity.name || '').toLowerCase().includes('switch')) continue;
 
             // Скрытие Gloop: ломаем render
@@ -595,52 +825,38 @@
                 if (!gloopOriginalRenders.has(id)) {
                     gloopOriginalRenders.set(id, entity.render);
                 }
-                entity.render = () => {};
+                entity.render = () => { };
                 continue;
             }
+            if (!originalVisibility.has(id)) originalVisibility.set(id, entity.isDestroyed);
 
-            if (!entity.radius || entity.radius <= 0) continue;
-
-            // Сохраняем эффекты для аур
-            if (!originalProps.has(id)) {
-                let hasEffects = false;
-                let savedEffects = null;
-                let savedFillColor = null;
-                if (entity.effects) {
-                    if (entity.effects.effects) {
-                        hasEffects = true;
-                        savedEffects = JSON.parse(JSON.stringify(entity.effects.effects));
-                    }
-                    if (entity.effects.fillColor) {
-                        savedFillColor = entity.effects.fillColor;
-                    }
+            // Store the inner effects array BEFORE modifying them so clones can use original values
+            if (!originalProps.has(id) && entity.effects && entity.effects.effects) {
+                try {
+                    originalProps.set(id, {
+                        hasEffects: true,
+                        effectsData: JSON.parse(JSON.stringify(entity.effects.effects))
+                    });
+                } catch (e) {
+                    originalProps.set(id, {
+                        hasEffects: true,
+                        effectsData: entity.effects.effects
+                    });
                 }
-                originalProps.set(id, {
-                    hasEffects: hasEffects,
-                    effectsData: savedEffects,
-                    fillColor: savedFillColor,
-                    isDestroyed: entity.isDestroyed,
-                    isDeparted: entity.isDeparted
-                });
-
-                // 🔽 СОХРАНЯЕМ ДЛЯ ПРЕДИКТА КАМЕРЫ
-                if (!window.__originalEffects) window.__originalEffects = new Map();
-                window.__originalEffects.set(id, savedEffects);
             }
 
+            // Zero out all effect radii to hide them properly
+            if (entity.effects?.effects && Number(id) > 0) {
+                for (const key in entity.effects.effects) {
+                    if (entity.effects.effects[key] && entity.effects.effects[key].radius !== undefined) {
+                        entity.effects.effects[key].radius = 0;
+                    }
+                }
+            }
             entity.isDestroyed = true;
-            entity.isDeparted = true;
-
-            if (entity.effects) {
-                if (entity.effects.effects && typeof entity.effects.effects === 'object') {
-                    entity.effects.effects = {};
-                }
-                if (entity.effects.fillColor) {
-                    entity.effects.fillColor = 'rgba(0, 0, 0, 0)';
-                }
-            }
         }
     }
+
     function restoreOriginalBalls(game) {
         if (!game?.gameState?.entities) return;
 
@@ -654,21 +870,27 @@
 
         // Обычные враги
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (originalProps.has(id)) {
-                const orig = originalProps.get(id);
-                entity.isDestroyed = orig.isDestroyed;
-                entity.isDeparted = orig.isDeparted;
+            if (originalVisibility.has(id)) {
+                entity.isDestroyed = originalVisibility.get(id);
+                console.log(`Restored isDestroyed for entity ${id} to ${entity.isDestroyed}`);
+                originalVisibility.delete(id);
+            }
 
-                if (orig.hasEffects && entity.effects) {
-                    entity.effects.effects = orig.effectsData;
+            // Restore effects data without replacing the entity.effects class instance
+            if (originalProps.has(id)) {
+                const stored = originalProps.get(id);
+                if (stored.effectsData) {
+                    if (!entity.effects) entity.effects = {};
+                    if (!entity.effects.effects) entity.effects.effects = {};
+
+                    for (const key in stored.effectsData) {
+                        // Put the saved effect data back into the game's array
+                        entity.effects.effects[key] = stored.effectsData[key];
+                    }
                 }
-                if (orig.fillColor && entity.effects) {
-                    entity.effects.fillColor = orig.fillColor;
-                }
+                originalProps.delete(id);
             }
         }
-        originalProps.clear();
-        if (window.__originalEffects) window.__originalEffects.clear();
     }
 
     // ========== 6. ИНЪЕКЦИЯ В AREA ==========
@@ -677,14 +899,24 @@
         if (!game || !game.area || !game.camera) return;
 
         if (currentArea !== game.area) {
+            const liveGame = getGameRef();
+
             // Восстанавливаем все сломанные render перед сменой зоны
             for (const [id, origRender] of gloopOriginalRenders.entries()) {
-                const liveGame = getGameRef();
                 if (liveGame?.gameState?.entities?.[id]) {
                     liveGame.gameState.entities[id].render = origRender;
                 }
             }
             gloopOriginalRenders.clear();
+
+            // Delete all clones on area change
+            if (liveGame?.gameState?.entities) {
+                for (const id of Object.keys(liveGame.gameState.entities)) {
+                    if (Number(id) < 0) {
+                        delete liveGame.gameState.entities[id];
+                    }
+                }
+            }
 
             currentArea = game.area;
             ballVelocities.clear();
@@ -696,10 +928,47 @@
         if (currentArea && !currentArea._originalRender) {
             currentArea._originalRender = currentArea.render;
 
-            currentArea.render = function(nativeCtx, cam) {
+            currentArea.render = function (nativeCtx, cam) {
                 const liveGame = getGameRef();
 
+                // MASTER SWITCH: Skip all modifications if script is OFF
+                if (!isOverlayEnabled) {
+                    return this._originalRender.call(this, nativeCtx, cam);
+                }
+
                 cacheIncomingAuras(liveGame);
+                // Manage clone visibility and clean up stale clones every frame
+                if (liveGame?.gameState?.entities) {
+                    for (const id of Object.keys(liveGame.gameState.entities)) {
+                        const numId = Number(id);
+                        if (numId < 0) {
+                            const originalId = String(-numId);
+                            const originalEnt = liveGame.gameState.entities[originalId];
+                            const cloneEnt = liveGame.gameState.entities[id];
+
+                            if (!originalEnt) {
+                                // Original enemy is gone, delete the clone completely
+                                delete liveGame.gameState.entities[id];
+                                continue;
+                            }
+
+                            const hasVelocity = Math.abs(originalEnt._vxMs) > 0.0001 || Math.abs(originalEnt._vyMs) > 0.0001;
+
+                            if (isExtrapolationEnabled && hasVelocity) {
+                                // Force visible
+                                cloneEnt.isDestroyed = false;
+                                cloneEnt.currentTransparency = 1;
+                                if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
+                            } else {
+                                // Force hidden instead of deleting to prevent spawn flicker
+                                cloneEnt.isDestroyed = true;
+                                cloneEnt.currentTransparency = 0;
+                                cloneEnt.radius = 0;
+                            }
+                        }
+                    }
+                }
+
                 updateSelfVisibility(liveGame);
 
                 if (isHideOriginalEnabled) hideOriginalBalls(liveGame);
@@ -729,8 +998,43 @@
 
     const overlayBtn = createBtn(60, '🎨 OVERLAY [ON]', '#0f0', () => {
         isOverlayEnabled = !isOverlayEnabled;
+
+        if (!isOverlayEnabled) {
+            // Turning OFF: Force disable sub-features and clean up
+            isExtrapolationEnabled = false;
+            isHideOriginalEnabled = false;
+            isHideSelfEnabled = false;
+
+            const game = getGameRef();
+            if (game) {
+                restoreOriginalBalls(game);
+                if (originalSelfProps && game.gameState?.entities?.[game.gameState.selfId]) {
+                    game.gameState.entities[game.gameState.selfId].isDeparted = originalSelfProps.isDeparted;
+                    originalSelfProps = null;
+                }
+                if (game.gameState?.entities) {
+                    for (const id of Object.keys(game.gameState.entities)) {
+                        if (Number(id) < 0) {
+                            delete game.gameState.entities[id];
+                        }
+                    }
+                }
+            }
+            originalVisibility.clear();
+            originalProps.clear();
+        } else {
+            // Turning ON: Restore default active states
+            isExtrapolationEnabled = true;
+        }
+
         overlayBtn.innerHTML = `🎨 OVERLAY [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
         overlayBtn.style.borderColor = isOverlayEnabled ? '#0f0' : '#f00';
+
+        // Update sub-feature buttons to reflect forced states
+        hideBtn.innerHTML = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
+        hideBtn.style.borderColor = isHideOriginalEnabled ? '#f0f' : '#0ff';
+        selfBtn.innerHTML = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
+        selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
     });
 
     const hideBtn = createBtn(110, '👻 HIDE ORIGINALS [OFF]', '#0ff', () => {
@@ -745,13 +1049,6 @@
         selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
     });
 
-    const extrapolateBtn = createBtn(210, `🔮 ${EXTRAPOLATION_TICKS} TICKS [ON]`, '#f0f', () => {
-        isExtrapolationEnabled = !isExtrapolationEnabled;
-        extrapolateBtn.innerHTML = `🔮 ${EXTRAPOLATION_TICKS} TICKS [${isExtrapolationEnabled ? 'ON' : 'OFF'}]`;
-        extrapolateBtn.style.borderColor = isExtrapolationEnabled ? '#f0f' : '#888';
-        if (!isExtrapolationEnabled) ballVelocities.clear();
-    });
-
     setInterval(() => {
         const game = getGameRef();
         if (game?.gameState?.entities) {
@@ -761,6 +1058,12 @@
             }
             for (const [id] of ballAuras) {
                 if (!existingIds.has(id)) ballAuras.delete(id);
+            }
+            for (const [id] of originalProps) {
+                if (!existingIds.has(id)) originalProps.delete(id);
+            }
+            for (const [id] of originalVisibility) {
+                if (!existingIds.has(id)) originalVisibility.delete(id);
             }
         }
     }, 4000);
