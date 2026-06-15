@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Evades.io - Balls & Effects Overlay v6.3
+// @name         Evades.io - Balls & Effects Overlay v6.3.1
 // @namespace    https://evades.io/
-// @version      6.3
+// @version      6.3.1
 // @description  Visuals for displaying balls and effects in Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -12,17 +12,17 @@
 (() => {
     'use strict';
 
-    // ==================== НАСТРОЙКИ ГРАФИКИ ====================
+    // ==================== GRAPHICS SETTINGS ====================
     const GHOST_ALPHA = 0.13;
     const HARMLESS_ALPHA = 0.13;
     const GRASSHARMLESS_ALPHA = 0.13;
     const DEFAULT_PLAYER_RADIUS = 15;
     const PLAYER_ALPHA = 0.7;
 
-    // ==================== НАСТРОЙКИ ЭКСТРАПОЛЯЦИИ ====================
+    // ==================== EXTRAPOLATION SETTINGS ====================
     const SERVER_TICK_MS = 1000 / 60;
 
-    // ==================== КОНФИГУРАЦИЯ ТИПОВ ШАРОВ ====================
+    // ==================== BALL TYPE CONFIGURATION ====================
     const ALLOWED_PROJECTILES = new Set([18, 33, 79, 83, 108, 145, 147, 186, 215]);
     const _ignoredTypes = new Set([62, 72, 199, 8]);
     const DEFAULT_PROJECTILES = new Set([
@@ -155,11 +155,11 @@
         injectEnemies(msg);
     };
 
-    // ==================== УПРАВЛЕНИЕ ХУКАМИ ====================
+    // ==================== HOOK MANAGEMENT ====================
     let isOverlayEnabled = true;
-    let isHideOriginalEnabled = false;
+    let isHideOriginalEnabled = true;
     let isHideSelfEnabled = false;
-    let isPredictPlayerEnabled = false;
+    let isPredictPlayerEnabled = true;
     let isUIVisible = true;
     let isExtrapolationEnabled = true;
 
@@ -273,7 +273,7 @@
             e._speedMs = Math.hypot(e._vxMs, e._vyMs);
             const msSinceTick = now - e._evadeLastTime;
             e._fx = e.x + (e._vxMs || 0) * msSinceTick;
-            e._fy = e.y + (e._vyMs || 0) * msSinceTick;
+            e._fy = e.y + (e._vxMs || 0) * msSinceTick;
 
             e._predX = e._fx + e._vxMs * predMs;
             e._predY = e._fy + e._vyMs * predMs;
@@ -512,7 +512,7 @@
         }
     };
 
-    // ========== ДИНАМИЧЕСКИЙ РАСЧЕТ СКОРОСТИ ШАРОВ ==========
+    // ========== DYNAMIC BALL SPEED CALCULATION ==========
     function getBallTrackedState(id, currentX, currentY, now, type) {
         let state = ballVelocities.get(id);
         if (!state) {
@@ -674,7 +674,7 @@
         return balls;
     }
 
-    // ========== ОТРИСОВКА ОВЕРЛЕЯ ==========
+    // ========== OVERLAY RENDERING ==========
     function drawBalls(nativeCtx, game, camera, now) {
         const gameState = game.gameState;
         const player = game.player;
@@ -691,7 +691,7 @@
             return { x: (wx - left) * scale, y: (wy - top) * scale };
         }
 
-        // --- Отрисовка кусочков Gloop ---
+        // --- Rendering Gloop pieces ---
         if (window.__gloopOffsets && window.__gloopOffsets.length > 0) {
             const pd = window.__predictData;
             const predX = (pd && (now - pd.time) < 100) ? pd.x : player.x;
@@ -716,7 +716,7 @@
             }
         }
 
-        // --- Вычисление экранных координат рендера оверлея игрока ---
+        // --- Calculating screen coordinates for player overlay render ---
         let playerCanvasX = canvas.width / 2;
         let playerCanvasY = canvas.height / 2;
 
@@ -729,8 +729,7 @@
             }
         }
 
-        // --- Рендер тела игрока (Оверлей) ---
-        // Условие: Рисуем плоский круг оверлея ТОЛЬКО если предикт ВЫКЛЮЧЕН, ЛИБО если игрок полностью СКРЫТ через Hide Self
+        // --- Rendering player body (Overlay) ---
         if (!(isPredictPlayerEnabled && !isHideSelfEnabled)) {
             const playerRadius = (player.radius || DEFAULT_PLAYER_RADIUS) * scale;
             nativeCtx.globalAlpha = PLAYER_ALPHA;
@@ -759,7 +758,7 @@
         }
     }
 
-    // ========== СИНХРОННЫЕ МОДИФИКАТОРЫ ВИДИМОСТИ ==========
+    // ========== SYNCHRONOUS VISIBILITY MODIFIERS ==========
     function updateSelfVisibility(game) {
         const gameState = game?.gameState;
         if (!gameState?.entities || !gameState.selfId) return;
@@ -850,7 +849,7 @@
         }
     }
 
-    // ========== ХУК ПОДМЕНЫ КООРДИНАТ КЛАССА ИГРОКА ==========
+    // ========== PLAYER CLASS COORDINATE SUBSTITUTION HOOK ==========
     function runPlayerRenderHook() {
         const game = getGameRef();
         const playerEntity = game?.player;
@@ -892,11 +891,11 @@
                 }
                 return this._originalRender.call(this, ctx, camera);
             };
-            console.log("%c[RenderHook] Успешно перехвачен прототип рендера класса игрока!", "color: #00ff00; font-weight: bold;");
+            console.log("%c[RenderHook] Successfully intercepted player class render prototype!", "color: #00ff00; font-weight: bold;");
         }
     }
 
-    // ========== ИНЪЕКЦИЯ В AREA (РЕНДЕР-ЦИКЛ ДВИЖКА) ==========
+    // ========== INJECTION INTO AREA (ENGINE RENDER LOOP) ==========
     function runRenderHook() {
         const game = getGameRef();
         if (!game || !game.area || !game.camera) return;
@@ -906,11 +905,6 @@
         if (currentArea !== game.area) {
             const liveGame = getGameRef();
 
-            for (const [id, origRender] of gloopOriginalRenders.entries()) {
-                if (liveGame?.gameState?.entities?.[id]) {
-                    liveGame.gameState.entities[id].render = origRender;
-                }
-            }
             gloopOriginalRenders.clear();
 
             if (liveGame?.gameState?.entities) {
@@ -923,6 +917,7 @@
             ballVelocities.clear();
             ballAuras.clear();
             originalProps.clear();
+            originalVisibility.clear(); //fixed old visibility leaking between areas
             window.__gloopOffsets = [];
         }
 
@@ -981,7 +976,7 @@
         }
     }
 
-    // ==================== UI БЛОК КНОПОК ====================
+    // ==================== UI BUTTONS BLOCK ====================
     function createBtn(bottom, text, color, onClick) {
         const btn = document.createElement('div');
         btn.style.cssText = `position: fixed; bottom: ${bottom}px; left: 10px; background: rgba(0,0,0,0.85); color: ${color}; font-family: monospace; font-size: 11px; padding: 6px 10px; border-radius: 6px; z-index: 1000000; cursor: pointer; border: 1px solid ${color}; user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;`;
@@ -1031,7 +1026,7 @@
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
-    const hideBtn = createBtn(110, '👻 HIDE ORIGINALS [OFF]', '#0ff', () => {
+    const hideBtn = createBtn(110, '👻 HIDE ORIGINALS [ON]', '#f0f', () => {
         isHideOriginalEnabled = !isHideOriginalEnabled;
         hideBtn.innerHTML = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
         hideBtn.style.borderColor = isHideOriginalEnabled ? '#f0f' : '#0ff';
@@ -1043,13 +1038,13 @@
         selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
     });
 
-    const predictPlayerBtn = createBtn(210, '🚀 PREDICT PLAYER [OFF]', '#f00', () => {
+    const predictPlayerBtn = createBtn(210, '🚀 PREDICT PLAYER [ON]', '#0f0', () => {
         isPredictPlayerEnabled = !isPredictPlayerEnabled;
         predictPlayerBtn.innerHTML = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
-    // Очистка кеша сущностей
+    // Entity cache cleanup
     setInterval(() => {
         const game = getGameRef();
         if (game?.gameState?.entities) {
