@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Evades.io - Balls & Effects Overlay v6.2
+// @name         Evades.io - Balls & Effects Overlay v6.3
 // @namespace    https://evades.io/
-// @version      6.2
+// @version      6.3
 // @description  Visuals for displaying balls and effects in Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -51,42 +51,38 @@
         pingHistory: [],
     });
 
-
     let _obs = new MutationObserver((ev) => {
         let elem = Array.from(document.querySelectorAll('script')).filter(a => a.type === "module" && a.src.match(/\/index\.[0-9a-f]{8}\.js/))[0];
         if (!elem) return;
-        let src = elem.src
+        let src = elem.src;
 
-        if (!navigator.userAgent.includes("Firefox")) elem.remove()
+        if (!navigator.userAgent.includes("Firefox")) elem.remove();
 
-        let req = new XMLHttpRequest()
-        req.open("GET", src, false)
-        req.send()
-        let code = req.response
+        let req = new XMLHttpRequest();
+        req.open("GET", src, false);
+        req.send();
+        let code = req.response;
         code = code
             .replace(/processServerMessage\(([^)]+)\)\{/, (m, msgVar) => `processServerMessage(${msgVar}){
         try {
             window._client && window._client.onMessage && window._client.onMessage(${msgVar});
         } catch(e){}`)
 
-            .replace(/ag\.emit\(([^)]+)\)/, (m, msgVar) => `(window._client && window._client.input && window._client.input(${msgVar}), ag.emit(${msgVar}))`)
+            .replace(/ag\.emit\(([^)]+)\)/, (m, msgVar) => `(window._client && window._client.input && window._client.input(${msgVar}), ag.emit(${msgVar}))`);
 
-        let nScr = document.createElement("script")
-        nScr.setAttribute("type", "module")
-        nScr.innerHTML = code
+        let nScr = document.createElement("script");
+        nScr.setAttribute("type", "module");
+        nScr.innerHTML = code;
         setTimeout(() => {
-            document.body.appendChild(nScr)
-        }, 100) // Delay to ensure the original script is removed before adding the modified one
-        console.log("Init")
-        _obs.disconnect()
-
-    })
+            document.body.appendChild(nScr);
+        }, 100);
+        console.log("Init");
+        _obs.disconnect();
+    });
     _obs.observe(document, { childList: true, subtree: true });
 
     // ==================== MSG EVENT LOGIC FUNCTIONS ====================
     window._client.input = (msg) => {
-        //console.log("Input", msg);
-
         if (msg.sequence) {
             window._client.seqQueue.push([msg.sequence, +new Date()]);
 
@@ -104,21 +100,12 @@
                 }
             }
         }
-
         return msg;
     };
-
-    let lastSeq = -1;
-    let lastPong = -1;
-    let lastPongTime = Date.now();
 
     window._client.onMessage = (msg) => {
         if (!msg.entities) msg.entities = [];
 
-        /*if (lastSeq != msg.sequence) {
-            console.log("Output", msg)
-            lastSeq = msg.sequence
-        }*/
         let me = msg?.globalEntities?.find(e => e.id === window._client.user?.self?.id);
 
         if (me) {
@@ -141,7 +128,6 @@
         if (_seq) {
             const rawPing = +new Date() - _seq[1];
 
-            // Keep a sliding window of the last 8 pings for a very stable average
             window._client.pingHistory.push(rawPing);
             if (window._client.pingHistory.length > 8) {
                 window._client.pingHistory.shift();
@@ -153,14 +139,12 @@
             window._client.seqQueue = window._client.seqQueue.filter(q => q[0] > msg.sequence);
         }
 
-        if (msg.pong) return; // Skip ping messages
-        if (!isOverlayEnabled) return
-        // --- Clean up injected predicted enemies when area changes ---
+        if (msg.pong) return;
+        if (!isOverlayEnabled) return;
         if (msg.area) {
             const game = getGameRef();
             if (game?.gameState?.entities) {
                 for (const id of Object.keys(game.gameState.entities)) {
-                    // If the ID is a negative number (as a string), it's one of our clones
                     if (Number(id) < 0) {
                         delete game.gameState.entities[id];
                     }
@@ -171,25 +155,21 @@
         injectEnemies(msg);
     };
 
-
     // ==================== УПРАВЛЕНИЕ ХУКАМИ ====================
     let isOverlayEnabled = true;
     let isHideOriginalEnabled = false;
     let isHideSelfEnabled = false;
+    let isPredictPlayerEnabled = false;
     let isUIVisible = true;
     let isExtrapolationEnabled = true;
 
     let currentArea = null;
     let originalProps = new Map();
-
     let originalVisibility = new Map();
-    let originalEffectVisibility = new Map();
-
     let originalSelfProps = null;
     let ballVelocities = new Map();
     let ballAuras = new Map();
-    let gloopOriginalRenders = new Map();   // сохранение оригинальных render для Gloop
-
+    let gloopOriginalRenders = new Map();
 
     // ==================== CONFIG & GLOBALS FOR PREDICTION ====================
     const config = {
@@ -200,11 +180,7 @@
     };
 
     const ENEMY_TYPE_WALL = 229;
-    const _walkableTypeSet = new Set([0, 4, 6]);
 
-    let _plLastPos = null, _plLastTime = 0, _plVxMs = 0, _plVyMs = 0;
-
-    // ========== 1. ХУК ДВИЖКА QUESTS-LAUNCHER ЧЕРЕЗ FIBER ==========
     function getGameRef() {
         try {
             const el = document.querySelector('div.quests-launcher');
@@ -233,7 +209,6 @@
 
     function updateEnemyPrediction(enemies) {
         const now = performance.now();
-        const tickDelay = window._client.seqQueue ? window._client.seqQueue.length : 0;
         const predMs = window._client.ping;
 
         for (const e of enemies) {
@@ -338,11 +313,9 @@
         }
 
         if (vx !== 0) {
-            // Moving horizontally: snap Y to horizontal wall (perpendicular to movement)
             if (onTop) y = bTop;
             if (onBottom) y = bBottom;
         } else {
-            // Moving vertically: snap X to vertical wall (perpendicular to movement)
             if (onLeft) x = bLeft;
             if (onRight) x = bRight;
         }
@@ -461,30 +434,26 @@
         }
     }
 
-
     const injectEnemies = (msg) => {
         const game = getGameRef();
         if (!game?.gameState?.entities) return;
         const gameState = game.gameState;
 
         if (!msg.entities) msg.entities = [];
-        const now = performance.now();
 
         const enemies = [];
         for (const [id, ent] of Object.entries(gameState.entities)) {
-            if (Number(id) < 0) continue; // Don't process injected clones
+            if (Number(id) < 0) continue;
             if (!ent.isEnemy) continue;
             if (ent.nick !== undefined || ent.entityType === 118 || ent.entityType === 113 || ent.entityType === 130 || _ignoredTypes.has(ent.entityType)) continue;
             if ((ent.name || '').toLowerCase().includes('switch')) continue;
-            if (ent.entityType === 136) continue; // Fixed typo from `entity` to `ent`
+            if (ent.entityType === 136) continue;
             if (typeof ent.x !== 'number' || typeof ent.y !== 'number' || !ent.radius) continue;
 
             enemies.push(ent);
         }
-        // 1. Update velocities and linear predictions
         updateEnemyPrediction(enemies);
 
-        // 2. Get zones for bouncing simulation
         let bounceZones = [];
         try {
             if (game.area && game.area.zones) {
@@ -494,25 +463,18 @@
             }
         } catch (e) { }
 
-        // 3. Calculate prediction time
-        const SERVER_TICK_MS = 1000 / 60;
-        const tickDelay = window._client.seqQueue ? window._client.seqQueue.length : 0;
         const predMs = window._client.ping;
-
-        // 4. Precompute trajectories with bouncing
         precomputeTrajectories(enemies, predMs, bounceZones);
 
-        // 5. Inject clones (only if moving and extrapolation is on)
         for (const [id, ent] of Object.entries(gameState.entities)) {
             const numericId = Number(id);
-            if (isNaN(numericId) || numericId < 0) continue; // Skip clones here
+            if (isNaN(numericId) || numericId < 0) continue;
 
             const hasVelocity = Math.abs(ent._vxMs) > 0.0001 || Math.abs(ent._vyMs) > 0.0001;
 
             if (isExtrapolationEnabled && hasVelocity) {
                 let predX, predY;
 
-                // Use trajectory if valid, otherwise fallback to linear prediction
                 if (ent._trajValid && ent._trajectory) {
                     const trajPos = interpolateTrajectory(ent._trajectory, predMs);
                     if (trajPos) {
@@ -534,7 +496,6 @@
                     isDestroyed: false,
                 });
 
-                // Use stored effects if available (before radius was set to 0), otherwise copy current
                 const storedProps = originalProps.get(id);
                 if (storedProps && storedProps.effectsData) {
                     clone.effects = ent.effects ? JSON.parse(JSON.stringify(ent.effects)) : {};
@@ -546,13 +507,12 @@
                         clone.effects = ent.effects;
                     }
                 }
-
                 msg.entities.push(clone);
             }
         }
     };
 
-    // ========== 2. ДИНАМИЧЕСКИЙ РАСЧЕТ СКОРОСТИ ==========
+    // ========== ДИНАМИЧЕСКИЙ РАСЧЕТ СКОРОСТИ ШАРОВ ==========
     function getBallTrackedState(id, currentX, currentY, now, type) {
         let state = ballVelocities.get(id);
         if (!state) {
@@ -610,11 +570,9 @@
         return state;
     }
 
-    // ========== СБОР АУР И ОФФСЕТОВ GLOOP ==========
     function cacheIncomingAuras(game) {
         if (!game?.gameState?.entities) return;
 
-        // === Собираем живые куски Gloop (только серверный inactive) ===
         window.__gloopOffsets = [];
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
             if (entity.entityType !== 136) continue;
@@ -628,7 +586,6 @@
             }
         }
 
-        // === Сбор аур ===
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
             let effs = null;
             if (originalProps.has(id) && originalProps.get(id).hasEffects) {
@@ -652,18 +609,14 @@
                         }
                     }
                 }
-                if (hasEffects) {
-                    ballAuras.set(id, activeAurasForBall);
-                } else {
-                    ballAuras.delete(id);
-                }
+                if (hasEffects) ballAuras.set(id, activeAurasForBall);
+                else ballAuras.delete(id);
             } else {
                 ballAuras.delete(id);
             }
         }
     }
 
-    // ========== 3. СБОР ДАННЫХ И СОРТИРОВКА СЛОЕВ ==========
     function getAllBalls(gameState, player, now) {
         const balls = [];
         if (!gameState?.entities || !player) return balls;
@@ -672,8 +625,7 @@
             if (id === gameState.selfId) continue;
             if (entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113) continue;
             if ((entity.name || '').toLowerCase().includes('switch') || entity.entityType === 130) continue;
-
-            if (entity.entityType === 136) continue;   // Gloop рисуем отдельно
+            if (entity.entityType === 136) continue;
 
             if (entity.radius && entity.radius > 0) {
                 let alpha = 1;
@@ -719,11 +671,10 @@
             if (!a.isType52 && b.isType52) return -1;
             return b.radius - a.radius;
         });
-
         return balls;
     }
 
-    // ========== 4. ОТРИСОВКА ==========
+    // ========== ОТРИСОВКА ОВЕРЛЕЯ ==========
     function drawBalls(nativeCtx, game, camera, now) {
         const gameState = game.gameState;
         const player = game.player;
@@ -731,31 +682,16 @@
 
         if (!gameState || !camera || !player) return;
 
-        if (gameState.performanceStats && gameState.performanceStats.pingSamples) {
-            const samples = gameState.performanceStats.pingSamples;
-            if (samples.length >= 5) {
-                const lastFive = samples.slice(-5);
-                const sum = lastFive.reduce((s, sample) => s + sample.value, 0);
-                const avgPing = sum / 5;
-                //window._client.ping = avgPing
-            }
-        }
-
         const balls = getAllBalls(gameState, player, now);
-
         const scale = camera.originalGameScale || camera.scale || 1;
         const left = camera.left || (camera.x - canvas.width / (2 * scale));
         const top = camera.top || (camera.y - canvas.height / (2 * scale));
 
-        // Helper: world coords to screen coords
         function worldToScreen(wx, wy) {
-            return {
-                x: (wx - left) * scale,
-                y: (wy - top) * scale
-            };
+            return { x: (wx - left) * scale, y: (wy - top) * scale };
         }
 
-        // --- 2. Отрисовка кусочков Gloop с привязкой к предикту камеры ---
+        // --- Отрисовка кусочков Gloop ---
         if (window.__gloopOffsets && window.__gloopOffsets.length > 0) {
             const pd = window.__predictData;
             const predX = (pd && (now - pd.time) < 100) ? pd.x : player.x;
@@ -779,36 +715,51 @@
                 nativeCtx.restore();
             }
         }
-        // --- 3. Рендер игрока ---
-        const playerRadius = (player.radius || DEFAULT_PLAYER_RADIUS) * scale;
-        nativeCtx.globalAlpha = PLAYER_ALPHA;
-        nativeCtx.beginPath();
-        nativeCtx.arc(canvas.width / 2, canvas.height / 2, playerRadius, 0, Math.PI * 2);
-        if (player.isEmberInvulnerable) {
-            nativeCtx.fillStyle = '#000000';
-        } else {
-            nativeCtx.fillStyle = player.color || '#00ff88';
-        }
-        nativeCtx.fill();
-        nativeCtx.globalAlpha = 1;
 
-        let playerStrokeWidth = 2;
-        let playerStrokeColor = '#ffffff';
-        if (player.isBandaged === true) {
-            playerStrokeWidth = 5;
+        // --- Вычисление экранных координат рендера оверлея игрока ---
+        let playerCanvasX = canvas.width / 2;
+        let playerCanvasY = canvas.height / 2;
+
+        if (isPredictPlayerEnabled) {
+            const pd = window.__predictData;
+            if (pd && (now - pd.time) < 100) {
+                const screenPos = worldToScreen(pd.x, pd.y);
+                playerCanvasX = screenPos.x;
+                playerCanvasY = screenPos.y;
+            }
         }
-        if (player.isUnbandaging === true) {
-            playerStrokeWidth = 5;
-            playerStrokeColor = '#ff0000';
+
+        // --- Рендер тела игрока (Оверлей) ---
+        // Условие: Рисуем плоский круг оверлея ТОЛЬКО если предикт ВЫКЛЮЧЕН, ЛИБО если игрок полностью СКРЫТ через Hide Self
+        if (!(isPredictPlayerEnabled && !isHideSelfEnabled)) {
+            const playerRadius = (player.radius || DEFAULT_PLAYER_RADIUS) * scale;
+            nativeCtx.globalAlpha = PLAYER_ALPHA;
+            nativeCtx.beginPath();
+            nativeCtx.arc(playerCanvasX, playerCanvasY, playerRadius, 0, Math.PI * 2);
+            if (player.isEmberInvulnerable) {
+                nativeCtx.fillStyle = '#000000';
+            } else {
+                nativeCtx.fillStyle = player.color || '#00ff88';
+            }
+            nativeCtx.fill();
+            nativeCtx.globalAlpha = 1;
+
+            let playerStrokeWidth = 2;
+            let playerStrokeColor = '#ffffff';
+            if (player.isBandaged === true) playerStrokeWidth = 5;
+            if (player.isUnbandaging === true) {
+                playerStrokeWidth = 5;
+                playerStrokeColor = '#ff0000';
+            }
+            nativeCtx.beginPath();
+            nativeCtx.arc(playerCanvasX, playerCanvasY, playerRadius, 0, Math.PI * 2);
+            nativeCtx.strokeStyle = playerStrokeColor;
+            nativeCtx.lineWidth = playerStrokeWidth;
+            nativeCtx.stroke();
         }
-        nativeCtx.beginPath();
-        nativeCtx.arc(canvas.width / 2, canvas.height / 2, playerRadius, 0, Math.PI * 2);
-        nativeCtx.strokeStyle = playerStrokeColor;
-        nativeCtx.lineWidth = playerStrokeWidth;
-        nativeCtx.stroke();
     }
 
-    // ========== 5. СИНХРОННЫЕ МОДИФИКАТОРЫ ВИДИМОСТИ ==========
+    // ========== СИНХРОННЫЕ МОДИФИКАТОРЫ ВИДИМОСТИ ==========
     function updateSelfVisibility(game) {
         const gameState = game?.gameState;
         if (!gameState?.entities || !gameState.selfId) return;
@@ -828,12 +779,8 @@
         const selfId = game.gameState.selfId;
 
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (id < 0) continue; // Skip our injected clones safely!
+            if (id < 0) continue;
 
-            if (!entity.isEnemy || entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113 || _ignoredTypes.has(entity.entityType) || entity.id === selfId || entity.isPlayer) continue;
-            if (entity.entityType === 130 || (entity.name || '').toLowerCase().includes('switch')) continue;
-
-            // Скрытие Gloop: ломаем render
             if (entity.entityType === 136) {
                 if (!gloopOriginalRenders.has(id)) {
                     gloopOriginalRenders.set(id, entity.render);
@@ -841,9 +788,12 @@
                 entity.render = () => { };
                 continue;
             }
+
+            if (!entity.isEnemy || entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113 || _ignoredTypes.has(entity.entityType) || entity.id === selfId || entity.isPlayer) continue;
+            if (entity.entityType === 130 || (entity.name || '').toLowerCase().includes('switch')) continue;
+
             if (!originalVisibility.has(id)) originalVisibility.set(id, entity.isDestroyed);
 
-            // Store the inner effects array BEFORE modifying them so clones can use original values
             if (!originalProps.has(id) && entity.effects && entity.effects.effects) {
                 try {
                     originalProps.set(id, {
@@ -858,7 +808,6 @@
                 }
             }
 
-            // Zero out all effect radii to hide them properly
             if (entity.effects?.effects && Number(id) > 0) {
                 for (const key in entity.effects.effects) {
                     if (entity.effects.effects[key] && entity.effects.effects[key].radius !== undefined) {
@@ -873,7 +822,6 @@
     function restoreOriginalBalls(game) {
         if (!game?.gameState?.entities) return;
 
-        // Восстанавливаем render для Gloop
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
             if (entity.entityType === 136 && gloopOriginalRenders.has(id)) {
                 entity.render = gloopOriginalRenders.get(id);
@@ -881,15 +829,12 @@
         }
         gloopOriginalRenders.clear();
 
-        // Обычные враги
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
             if (originalVisibility.has(id)) {
                 entity.isDestroyed = originalVisibility.get(id);
-                console.log(`Restored isDestroyed for entity ${id} to ${entity.isDestroyed}`);
                 originalVisibility.delete(id);
             }
 
-            // Restore effects data without replacing the entity.effects class instance
             if (originalProps.has(id)) {
                 const stored = originalProps.get(id);
                 if (stored.effectsData) {
@@ -897,7 +842,6 @@
                     if (!entity.effects.effects) entity.effects.effects = {};
 
                     for (const key in stored.effectsData) {
-                        // Put the saved effect data back into the game's array
                         entity.effects.effects[key] = stored.effectsData[key];
                     }
                 }
@@ -906,15 +850,62 @@
         }
     }
 
-    // ========== 6. ИНЪЕКЦИЯ В AREA ==========
+    // ========== ХУК ПОДМЕНЫ КООРДИНАТ КЛАССА ИГРОКА ==========
+    function runPlayerRenderHook() {
+        const game = getGameRef();
+        const playerEntity = game?.player;
+        if (!playerEntity) return;
+
+        let proto = Object.getPrototypeOf(playerEntity);
+        while (proto && !proto.hasOwnProperty('render')) {
+            proto = Object.getPrototypeOf(proto);
+        }
+
+        if (proto && !proto._originalRender) {
+            proto._originalRender = proto.render;
+
+            proto.render = function (ctx, camera) {
+                const isSelf = this.isLocalPlayer === true ||
+                               (window._client?.user?.self?.id && this.id === window._client.user.self.id);
+
+                if (isSelf && isPredictPlayerEnabled) {
+                    const pd = window.__predictData;
+                    const now = performance.now();
+
+                    if (pd && (now - pd.time) < 100) {
+                        const offsetX = pd.x - this.x;
+                        const offsetY = pd.y - this.y;
+
+                        const realX = this.x;
+                        const realY = this.y;
+
+                        this.x += offsetX;
+                        this.y += offsetY;
+
+                        const renderResult = this._originalRender.call(this, ctx, camera);
+
+                        this.x = realX;
+                        this.y = realY;
+
+                        return renderResult;
+                    }
+                }
+                return this._originalRender.call(this, ctx, camera);
+            };
+            console.log("%c[RenderHook] Успешно перехвачен прототип рендера класса игрока!", "color: #00ff00; font-weight: bold;");
+        }
+    }
+
+    // ========== ИНЪЕКЦИЯ В AREA (РЕНДЕР-ЦИКЛ ДВИЖКА) ==========
     function runRenderHook() {
         const game = getGameRef();
         if (!game || !game.area || !game.camera) return;
 
+        runPlayerRenderHook();
+
         if (currentArea !== game.area) {
             const liveGame = getGameRef();
 
-            // Восстанавливаем все сломанные render перед сменой зоны
             for (const [id, origRender] of gloopOriginalRenders.entries()) {
                 if (liveGame?.gameState?.entities?.[id]) {
                     liveGame.gameState.entities[id].render = origRender;
@@ -922,12 +913,9 @@
             }
             gloopOriginalRenders.clear();
 
-            // Delete all clones on area change
             if (liveGame?.gameState?.entities) {
                 for (const id of Object.keys(liveGame.gameState.entities)) {
-                    if (Number(id) < 0) {
-                        delete liveGame.gameState.entities[id];
-                    }
+                    if (Number(id) < 0) delete liveGame.gameState.entities[id];
                 }
             }
 
@@ -944,13 +932,11 @@
             currentArea.render = function (nativeCtx, cam) {
                 const liveGame = getGameRef();
 
-                // MASTER SWITCH: Skip all modifications if script is OFF
                 if (!isOverlayEnabled) {
                     return this._originalRender.call(this, nativeCtx, cam);
                 }
 
                 cacheIncomingAuras(liveGame);
-                // Manage clone visibility and clean up stale clones every frame
                 if (liveGame?.gameState?.entities) {
                     for (const id of Object.keys(liveGame.gameState.entities)) {
                         const numId = Number(id);
@@ -960,7 +946,6 @@
                             const cloneEnt = liveGame.gameState.entities[id];
 
                             if (!originalEnt) {
-                                // Original enemy is gone, delete the clone completely
                                 delete liveGame.gameState.entities[id];
                                 continue;
                             }
@@ -968,15 +953,13 @@
                             const hasVelocity = Math.abs(originalEnt._vxMs) > 0.0001 || Math.abs(originalEnt._vyMs) > 0.0001;
 
                             if (isExtrapolationEnabled && hasVelocity) {
-                                // Force visible
                                 cloneEnt.isDestroyed = false;
                                 cloneEnt.currentTransparency = 1;
                                 if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
                             } else {
-                                // Force hidden instead of deleting to prevent spawn flicker
-                                cloneEnt.isDestroyed = true;
+                                cloneEnt.isDestroyed = false;
                                 cloneEnt.currentTransparency = 0;
-                                cloneEnt.radius = 0;
+                                cloneEnt.radius = originalEnt.radius;
                             }
                         }
                     }
@@ -998,12 +981,12 @@
         }
     }
 
+    // ==================== UI БЛОК КНОПОК ====================
     function createBtn(bottom, text, color, onClick) {
         const btn = document.createElement('div');
         btn.style.cssText = `position: fixed; bottom: ${bottom}px; left: 10px; background: rgba(0,0,0,0.85); color: ${color}; font-family: monospace; font-size: 11px; padding: 6px 10px; border-radius: 6px; z-index: 1000000; cursor: pointer; border: 1px solid ${color}; user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;`;
         btn.innerHTML = text;
         btn.onclick = onClick;
-        // Запрет выделения текста при двойном клике
         btn.addEventListener('mousedown', (e) => e.preventDefault());
         document.body.appendChild(btn);
         return btn;
@@ -1013,10 +996,10 @@
         isOverlayEnabled = !isOverlayEnabled;
 
         if (!isOverlayEnabled) {
-            // Turning OFF: Force disable sub-features and clean up
             isExtrapolationEnabled = false;
             isHideOriginalEnabled = false;
             isHideSelfEnabled = false;
+            isPredictPlayerEnabled = false;
 
             const game = getGameRef();
             if (game) {
@@ -1027,27 +1010,25 @@
                 }
                 if (game.gameState?.entities) {
                     for (const id of Object.keys(game.gameState.entities)) {
-                        if (Number(id) < 0) {
-                            delete game.gameState.entities[id];
-                        }
+                        if (Number(id) < 0) delete game.gameState.entities[id];
                     }
                 }
             }
             originalVisibility.clear();
             originalProps.clear();
         } else {
-            // Turning ON: Restore default active states
             isExtrapolationEnabled = true;
         }
 
         overlayBtn.innerHTML = `🎨 OVERLAY [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
         overlayBtn.style.borderColor = isOverlayEnabled ? '#0f0' : '#f00';
 
-        // Update sub-feature buttons to reflect forced states
         hideBtn.innerHTML = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
         hideBtn.style.borderColor = isHideOriginalEnabled ? '#f0f' : '#0ff';
         selfBtn.innerHTML = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
         selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
+        predictPlayerBtn.innerHTML = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
+        predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
     const hideBtn = createBtn(110, '👻 HIDE ORIGINALS [OFF]', '#0ff', () => {
@@ -1062,6 +1043,13 @@
         selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
     });
 
+    const predictPlayerBtn = createBtn(210, '🚀 PREDICT PLAYER [OFF]', '#f00', () => {
+        isPredictPlayerEnabled = !isPredictPlayerEnabled;
+        predictPlayerBtn.innerHTML = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
+        predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
+    });
+
+    // Очистка кеша сущностей
     setInterval(() => {
         const game = getGameRef();
         if (game?.gameState?.entities) {
@@ -1085,7 +1073,7 @@
         if (e.key === 'PageUp') {
             e.preventDefault();
             isUIVisible = !isUIVisible;
-            [overlayBtn, hideBtn, selfBtn, extrapolateBtn].forEach(b => b.style.display = isUIVisible ? 'block' : 'none');
+            [overlayBtn, hideBtn, selfBtn, predictPlayerBtn].forEach(b => b.style.display = isUIVisible ? 'block' : 'none');
         }
     });
 
