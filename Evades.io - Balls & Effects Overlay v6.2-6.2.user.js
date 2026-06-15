@@ -13,7 +13,6 @@
     'use strict';
 
     // ==================== НАСТРОЙКИ ГРАФИКИ ====================
-    const STROKE_WIDTH = 2;
     const GHOST_ALPHA = 0.13;
     const HARMLESS_ALPHA = 0.13;
     const GRASSHARMLESS_ALPHA = 0.13;
@@ -21,12 +20,11 @@
     const PLAYER_ALPHA = 0.7;
 
     // ==================== НАСТРОЙКИ ЭКСТРАПОЛЯЦИИ ====================
-    const TICK_MS = 1000 / 60;
-    let EXTRAPOLATION_TICKS = 2;
+    const SERVER_TICK_MS = 1000 / 60;
 
     // ==================== КОНФИГУРАЦИЯ ТИПОВ ШАРОВ ====================
     const ALLOWED_PROJECTILES = new Set([18, 33, 79, 83, 108, 145, 147, 186, 215]);
-
+    const _ignoredTypes = new Set([62, 72, 199, 8]);
     const DEFAULT_PROJECTILES = new Set([
         1, 4, 7, 14, 15, 21, 32, 35, 37, 38, 40, 46, 52, 54, 56, 59, 62, 70, 72, 75, 82, 85, 86, 96, 99,
         103, 106, 109, 116, 122, 123, 126, 129, 133, 135, 136, 137, 141, 148, 149, 150, 151, 152, 153,
@@ -50,6 +48,7 @@
         selfCmdHistory: [],
         selfAcked: null,
         ping: 0,
+        pingHistory: [],
     });
 
 
@@ -75,8 +74,9 @@
         let nScr = document.createElement("script")
         nScr.setAttribute("type", "module")
         nScr.innerHTML = code
-        document.body.appendChild(nScr)
-
+        setTimeout(() => {
+            document.body.appendChild(nScr)
+        }, 100) // Delay to ensure the original script is removed before adding the modified one
         console.log("Init")
         _obs.disconnect()
 
@@ -139,7 +139,17 @@
         }
         let _seq = window._client.seqQueue.find(q => q[0] === msg.sequence);
         if (_seq) {
-            window._client.ping = +new Date() - _seq[1];
+            const rawPing = +new Date() - _seq[1];
+
+            // Keep a sliding window of the last 8 pings for a very stable average
+            window._client.pingHistory.push(rawPing);
+            if (window._client.pingHistory.length > 8) {
+                window._client.pingHistory.shift();
+            }
+
+            const sum = window._client.pingHistory.reduce((a, b) => a + b, 0);
+            window._client.ping = Math.round(sum / window._client.pingHistory.length * 100) / 100;
+
             window._client.seqQueue = window._client.seqQueue.filter(q => q[0] > msg.sequence);
         }
 
@@ -222,10 +232,9 @@
     }
 
     function updateEnemyPrediction(enemies) {
-        const SERVER_TICK_MS = 1000 / 60;
         const now = performance.now();
         const tickDelay = window._client.seqQueue ? window._client.seqQueue.length : 0;
-        const predMs = tickDelay * SERVER_TICK_MS;
+        const predMs = window._client.ping;
 
         for (const e of enemies) {
             if (!e._evadeLastPos) {
@@ -465,7 +474,7 @@
         for (const [id, ent] of Object.entries(gameState.entities)) {
             if (Number(id) < 0) continue; // Don't process injected clones
             if (!ent.isEnemy) continue;
-            if (ent.nick !== undefined || ent.entityType === 118 || ent.entityType === 113 || ent.entityType === 130) continue;
+            if (ent.nick !== undefined || ent.entityType === 118 || ent.entityType === 113 || ent.entityType === 130 || _ignoredTypes.has(ent.entityType)) continue;
             if ((ent.name || '').toLowerCase().includes('switch')) continue;
             if (ent.entityType === 136) continue; // Fixed typo from `entity` to `ent`
             if (typeof ent.x !== 'number' || typeof ent.y !== 'number' || !ent.radius) continue;
@@ -488,7 +497,7 @@
         // 3. Calculate prediction time
         const SERVER_TICK_MS = 1000 / 60;
         const tickDelay = window._client.seqQueue ? window._client.seqQueue.length : 0;
-        const predMs = tickDelay * SERVER_TICK_MS;
+        const predMs = window._client.ping;
 
         // 4. Precompute trajectories with bouncing
         precomputeTrajectories(enemies, predMs, bounceZones);
@@ -728,7 +737,7 @@
                 const lastFive = samples.slice(-5);
                 const sum = lastFive.reduce((s, sample) => s + sample.value, 0);
                 const avgPing = sum / 5;
-                window._client.ping = avgPing
+                //window._client.ping = avgPing
             }
         }
 
@@ -821,7 +830,7 @@
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
             if (id < 0) continue; // Skip our injected clones safely!
 
-            if (!entity.isEnemy || entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113 || entity.id === selfId || entity.isPlayer) continue;
+            if (!entity.isEnemy || entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113 || _ignoredTypes.has(entity.entityType) || entity.id === selfId || entity.isPlayer) continue;
             if (entity.entityType === 130 || (entity.name || '').toLowerCase().includes('switch')) continue;
 
             // Скрытие Gloop: ломаем render
