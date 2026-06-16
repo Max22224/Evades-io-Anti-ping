@@ -161,6 +161,7 @@
     let isHideOriginalEnabled = true;
     let isHideSelfEnabled = false;
     let isPredictPlayerEnabled = true;
+    let isExtraTickDelayEnabled = false;
     let isUIVisible = true;
     let isExtrapolationEnabled = true;
 
@@ -210,8 +211,7 @@
 
     function updateEnemyPrediction(enemies) {
         const now = performance.now();
-        const predMs = window._client.ping;
-
+        const predMs = window._client.ping + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
         for (const e of enemies) {
             if (!e._evadeLastPos) {
                 e._evadeLastPos = { x: e.x, y: e.y };
@@ -231,7 +231,6 @@
                 const wallClockDt = now - e._evadeLastTime;
                 const numTicks = Math.max(1, Math.round(wallClockDt / SERVER_TICK_MS));
                 const effectiveDt = numTicks * SERVER_TICK_MS;
-
                 if (effectiveDt > 0.5) {
                     const rawVxMs = (e.x - e._evadeLastPos.x) / effectiveDt;
                     const rawVyMs = (e.y - e._evadeLastPos.y) / effectiveDt;
@@ -464,7 +463,7 @@
             }
         } catch (e) { }
 
-        const predMs = window._client.ping;
+        const predMs = window._client.ping + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
         precomputeTrajectories(enemies, predMs, bounceZones);
 
         for (const [id, ent] of Object.entries(gameState.entities)) {
@@ -1045,6 +1044,11 @@
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
+    const extraTickBtn = createBtn(260, '⏱️ +1 TICK EXTRAPOLATION [OFF]', '#ffa500', () => {
+        isExtraTickDelayEnabled = !isExtraTickDelayEnabled;
+        extraTickBtn.innerHTML = `⏱️ +1 TICK EXTRAPOLATION [${isExtraTickDelayEnabled ? 'ON' : 'OFF'}]`;
+        extraTickBtn.style.borderColor = isExtraTickDelayEnabled ? '#0f0' : '#ffa500';
+    });
     // Entity cache cleanup
     setInterval(() => {
         const game = getGameRef();
@@ -1069,7 +1073,7 @@
         if (e.key === 'PageUp') {
             e.preventDefault();
             isUIVisible = !isUIVisible;
-            [overlayBtn, hideBtn, selfBtn, predictPlayerBtn].forEach(b => b.style.display = isUIVisible ? 'block' : 'none');
+            [overlayBtn, hideBtn, selfBtn, predictPlayerBtn, extraTickBtn].forEach(b => b.style.display = isUIVisible ? 'block' : 'none');
         }
     });
 
