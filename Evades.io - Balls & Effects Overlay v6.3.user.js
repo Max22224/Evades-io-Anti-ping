@@ -76,7 +76,7 @@
         nScr.innerHTML = code;
         setTimeout(() => {
             document.body.appendChild(nScr);
-        }, 100);
+        }, 100); // Delay to ensure the original script is removed before adding the modified one
         console.log("Init");
         _obs.disconnect();
     });
@@ -140,7 +140,7 @@
             window._client.seqQueue = window._client.seqQueue.filter(q => q[0] > msg.sequence);
         }
 
-        if (msg.pong) return;
+        if (msg.pong) return; // Skip ping messages
         if (!isOverlayEnabled) return;
         if (msg.area) {
             const game = getGameRef();
@@ -273,7 +273,7 @@
             e._speedMs = Math.hypot(e._vxMs, e._vyMs);
             const msSinceTick = now - e._evadeLastTime;
             e._fx = e.x + (e._vxMs || 0) * msSinceTick;
-            e._fy = e.y + (e._vxMs || 0) * msSinceTick;
+            e._fy = e.y + (e._vyMs || 0) * msSinceTick;
 
             e._predX = e._fx + e._vxMs * predMs;
             e._predY = e._fy + e._vyMs * predMs;
@@ -609,8 +609,11 @@
                         }
                     }
                 }
-                if (hasEffects) ballAuras.set(id, activeAurasForBall);
-                else ballAuras.delete(id);
+                if (hasEffects) {
+                    ballAuras.set(id, activeAurasForBall);
+                } else {
+                    ballAuras.delete(id);
+                }
             } else {
                 ballAuras.delete(id);
             }
@@ -687,8 +690,12 @@
         const left = camera.left || (camera.x - canvas.width / (2 * scale));
         const top = camera.top || (camera.y - canvas.height / (2 * scale));
 
+        // Helper: world coords to screen coords
         function worldToScreen(wx, wy) {
-            return { x: (wx - left) * scale, y: (wy - top) * scale };
+            return {
+                x: (wx - left) * scale,
+                y: (wy - top) * scale
+            };
         }
 
         // --- Rendering Gloop pieces ---
@@ -807,7 +814,7 @@
                 }
             }
 
-            if (entity.effects?.effects && Number(id) >= 0) { //fixed effect not cleating in ball with id 0
+            if (entity.effects?.effects && Number(id) >= 0) { //fixed effect not clearing in ball with id 0
                 for (const key in entity.effects.effects) {
                     if (entity.effects.effects[key] && entity.effects.effects[key].radius !== undefined) {
                         entity.effects.effects[key].radius = 0;
