@@ -21,17 +21,18 @@
 
     // ==================== EXTRAPOLATION SETTINGS ====================
     const SERVER_TICK_MS = 1000 / 60;
+    const CLONE_OFFSET = 10000000; // Fixed: Offset to handle entity id === 0 correctly
 
     // ==================== BALL TYPE CONFIGURATION ====================
     const ALLOWED_PROJECTILES = new Set([18, 33, 79, 83, 108, 145, 147, 186, 215]);
     const _ignoredTypes = new Set([62, 72, 199, 8]);
     const DEFAULT_PROJECTILES = new Set([
-        1, 4, 7, 14, 15, 21, 32, 35, 37, 38, 40, 46, 52, 54, 56, 59, 62, 70, 72, 75, 82, 85, 86, 96, 99,
+        1, 4, 7, 14, 15, 21, 32, 35, 37, 38, 40, 46, 54, 56, 59, 62, 70, 72, 75, 82, 85, 86, 96, 99,
         103, 106, 109, 116, 122, 123, 126, 129, 133, 135, 136, 137, 141, 148, 149, 150, 151, 152, 153,
         154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 166, 168, 169, 170, 172, 173, 174, 178,
         179, 185, 190, 191, 194, 198, 213, 222, 224, 226, 234
     ]);
-
+    //type 52 is flower "projectile" that can go out of bounds and have 0 speed because its on flower enemy with id 51)
     const EXCLUDED_OTHERS = new Set([30, 43, 44, 71, 197, 200, 227, 228, 229]);
 
     function canBounce(type) {
@@ -490,7 +491,7 @@
                 }
 
                 const clone = Object.assign({}, ent, {
-                    id: -numericId,
+                    id: -numericId - CLONE_OFFSET, // Fixed: Using CLONE_OFFSET to ensure id is strictly negative, even when numericId === 0
                     x: predX,
                     y: predY,
                     isDestroyed: false,
@@ -778,7 +779,7 @@
         const selfId = game.gameState.selfId;
 
         for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (id < 0) continue;
+            if (Number(id) < 0) continue;
 
             if (entity.entityType === 136) {
                 if (!gloopOriginalRenders.has(id)) {
@@ -807,7 +808,7 @@
                 }
             }
 
-            if (entity.effects?.effects && Number(id) > 0) {
+            if (entity.effects?.effects && Number(id) >= 0) { //fixed effect not cleating in ball with id 0
                 for (const key in entity.effects.effects) {
                     if (entity.effects.effects[key] && entity.effects.effects[key].radius !== undefined) {
                         entity.effects.effects[key].radius = 0;
@@ -917,7 +918,7 @@
             ballVelocities.clear();
             ballAuras.clear();
             originalProps.clear();
-            originalVisibility.clear(); //fixed old visibility leaking between areas
+            originalVisibility.clear();
             window.__gloopOffsets = [];
         }
 
@@ -936,7 +937,7 @@
                     for (const id of Object.keys(liveGame.gameState.entities)) {
                         const numId = Number(id);
                         if (numId < 0) {
-                            const originalId = String(-numId);
+                            const originalId = String(-numId - CLONE_OFFSET); // Fixed: Reversing the clone ID math with CLONE_OFFSET
                             const originalEnt = liveGame.gameState.entities[originalId];
                             const cloneEnt = liveGame.gameState.entities[id];
 
