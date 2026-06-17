@@ -47,6 +47,8 @@
     let currentMouseX = window.innerWidth / 2;
     let currentMouseY = window.innerHeight / 2;
     let isShiftPressed = false;
+    let lastActiveStepX = 0;
+    let lastActiveStepY = 0;
 
     // Создание HTML-панели дебага
     const debugDiv = document.createElement('div');
@@ -276,53 +278,16 @@
         const pY = (player.pos && player.pos.y !== undefined) ? player.pos.y : player.y;
         const camera = game?.camera;
 
-        // ================= ДИНАМИЧЕСКИЙ ПРЕДИКТ-ТИК ПО ПИНГУ =================
-
-        if (!window.__predictTickHistory) {
-            window.__predictTickHistory = [];
+        // ================= ZONE FRICTION =================
+        let zoneFriction = 0.75;
+        if (game.area && game.area.friction !== undefined) {
+            zoneFriction = game.area.friction;
+        } else if (game.gameState?.worlds && player.world !== undefined && player.area !== undefined) {
+            const currentWorld = game.gameState.worlds[player.world];
+            const currentAreaObj = currentWorld?.areas[player.area];
+            if (currentAreaObj?.friction !== undefined) zoneFriction = currentAreaObj.friction;
         }
-
-        const currentTicks = window._client.selfCmdHistory.length;
-
-        window.__predictTickHistory.push(currentTicks);
-
-        if (window.__predictTickHistory.length > 15) {
-            window.__predictTickHistory.shift();
-        }
-
-        const sorted = [...window.__predictTickHistory].sort((a, b) => a - b);
-
-        PREDICT_TICKS = sorted[Math.floor(sorted.length / 2)];
-
-        // Рассчитываем собственную скорость изменения координат игрока
-        const nowTime = performance.now();
-        const pDt = (nowTime - lastPlayerVelocityTime) / 1000;
-        const isValidPDt = pDt > 0.005 && pDt < 0.5;
-
-        if (lastPlayerX !== null && lastPlayerY !== null && isValidPDt) {
-            if (pX !== lastPlayerX || pY !== lastPlayerY) {
-                const rawPVx = (pX - lastPlayerX) / (pDt * 60);
-                const rawPVy = (pY - lastPlayerY) / (pDt * 60);
-                const pFilter = 0.25;
-                playerVx = playerVx * (1 - pFilter) + rawPVx * pFilter;
-                playerVy = playerVy * (1 - pFilter) + rawPVy * pFilter;
-            } else {
-                playerVx *= 0.7;
-                playerVy *= 0.7;
-            }
-        }
-        lastPlayerX = pX;
-        lastPlayerY = pY;
-        lastPlayerVelocityTime = nowTime;
-
-        // Запись истории скоростей для усреднения в дебаге
-        playerVxHistory.push(playerVx);
-        playerVyHistory.push(playerVy);
-        if (playerVxHistory.length > 60) playerVxHistory.shift();
-        if (playerVyHistory.length > 60) playerVyHistory.shift();
-
-        const avgPlayerVx = playerVxHistory.reduce((s, v) => s + v, 0) * 2 / playerVxHistory.length;
-        const avgPlayerVy = playerVyHistory.reduce((s, v) => s + v, 0) * 2 / playerVyHistory.length;
+        if (player.slippery) zoneFriction = 0;
 
         const isDead = player.isDead || player.dead || (player.deathTimer !== undefined && player.deathTimer !== -1);
         const hasMouseControl = !!(game.gameState && game.gameState.mouseDown);
@@ -333,42 +298,15 @@
             isMagmaxAbilityActive = false;
         }
 
-        const canvasRect = document.querySelector('canvas')?.getBoundingClientRect();
-        const globalScale = camera.originalGameScale || camera.scale || 1;
-
-        // Convert mouse screen position to world coordinates
-        const mouseCanvasX = currentMouseX - (canvasRect ? canvasRect.left : 0);
-        const mouseCanvasY = currentMouseY - (canvasRect ? canvasRect.top : 0);
-        const mouseWorldX = camera.left + mouseCanvasX / globalScale;
-        const mouseWorldY = camera.top + mouseCanvasY / globalScale;
-
-        // Direction vector and distance in world units
-        let dirX = mouseWorldX - pX;
-        let dirY = mouseWorldY - pY;
-
-        const currentDist = Math.hypot(dirX, dirY);
-        const mouseDistFullStrength = 150; // World units
-
-        if (isDead || !hasMouseControl || isVoid) {
-            predictedStepsX = [];
-            predictedStepsY = [];
-            playerVxHistory = [];
-            playerVyHistory = [];
-
-            entityVelocities.clear();
-            lastAuraCheckTime = performance.now();
-
-            lastPlayerX = null;
-            lastPlayerY = null;
-            playerVx = 0;
-            playerVy = 0;
-            lastPlayerVelocityTime = performance.now();
-
-            poisonGhostTimer = 0;
-            poisonSniperTimer = 0;
-
+        // ================= HARD RESET =================
+        if (isDead || isVoid) {
+            window.__predVelState = { vx: 0, vy: 0 };
+            window.__smoothPendingTicks = 0;
+            window.__smoothPredX = undefined;
+            window.__smoothPredY = undefined;
+            window.__predictData = { x: pX, y: pY, time: performance.now() };
             if (isDebugVisible) {
-                updateDebugUI(0, 0, 0, 0, isVoid, false, player.voidTime || 0, player.isIced === true, isMagmaxAbilityActive, false, 0, mouseDistFullStrength, 0, currentDist, 0, 0, PREDICT_TICKS, 0, 0, 0, 0, 0, 0);
+                updateDebugUI(0, 0, 0, 0, isVoid, false, player.voidTime || 0, player.isIced === true, isMagmaxAbilityActive, false, 0, 150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
             }
             return { x: pX, y: pY };
         }
@@ -414,39 +352,18 @@
             }
         } catch (err) { }
 
-        let projectedOffsetX = 0;
-        let projectedOffsetY = 0;
-        for (let i = 0; i < predictedStepsX.length; i++) {
-            projectedOffsetX += predictedStepsX[i];
-            projectedOffsetY += predictedStepsY[i];
-        }
-        const futurePlayerX = pX + projectedOffsetX;
-        const futurePlayerY = pY + projectedOffsetY;
-
-        const aura = getActiveAuras(player, game, futurePlayerX, futurePlayerY);
-
-        let zoneFriction = 0.75;
-        if (game.area && game.area.friction !== undefined) {
-            zoneFriction = game.area.friction;
-        } else if (game.gameState?.worlds && player.world !== undefined && player.area !== undefined) {
-            const currentWorld = game.gameState.worlds[player.world];
-            const currentAreaObj = currentWorld?.areas[player.area];
-            if (currentAreaObj?.friction !== undefined) zoneFriction = currentAreaObj.friction;
-        }
+        // ================= AURA & SPEED CALCULATION =================
+        const aura = getActiveAuras(player, game, pX, pY);
 
         if (aura.slippery || player.slippery) {
             zoneFriction = 0;
         }
 
         let baseSpeed = player.calculateSpeed ? player.calculateSpeed(0) : (player.speed || 0);
-
         const maxPoisonTicks = Math.max(poisonGhostTimer, poisonSniperTimer);
-        if (maxPoisonTicks > 0) {
-            baseSpeed *= 3;
-        }
+        if (maxPoisonTicks > 0) baseSpeed *= 3;
 
         let effectiveSlow = 0;
-
         if (player.isIced === true) {
             baseSpeed = 0;
         } else {
@@ -459,12 +376,8 @@
         }
 
         let additionalSpeed = 0;
-        if (player.mutatiorbBuffSpeedBoost === true) {
-            additionalSpeed += (player.heroType == 10) ? 90 : 60;
-        }
-        if (player.sweetToothConsumed === true) {
-            additionalSpeed += 150;
-        }
+        if (player.mutatiorbBuffSpeedBoost === true) additionalSpeed += (player.heroType == 10) ? 90 : 60;
+        if (player.sweetToothConsumed === true) additionalSpeed += 150;
 
         if (player.heroType == 17 && isMagmaxAbilityActive) {
             const ab1 = player.abilityOne;
@@ -487,37 +400,28 @@
         }
 
         let finalMovementSpeed = baseSpeed + additionalSpeed;
-
         const iceSpeed = player.calculateSpeedChanges ? player.calculateSpeedChanges(player.speed) : (player.speed || 0);
         let currentIceSpeed = iceSpeed;
-        if (baseSpeed === 0 && additionalSpeed > 0) {
-            currentIceSpeed = additionalSpeed;
-        }
+        if (baseSpeed === 0 && additionalSpeed > 0) currentIceSpeed = additionalSpeed;
 
         const ab2 = player.abilityTwo;
         if (ab2 && ab2.abilityType == 98 && ab2.locked === false && ab2.level === 1 && !player.isStickyCoatDisabled) {
             try {
                 const entitiesList = game.entities || game.gameState?.entities;
                 let isPlayerSticky = false;
-
                 if (entitiesList) {
                     safeForEach(entitiesList, (ent) => {
                         if (!ent || !ent.isPlayer) return;
                         if (ent.IsLocalPlayer || ent.isLocalPlayer || ent === player) return;
-
                         const entX = (ent.pos && ent.pos.x !== undefined) ? ent.pos.x : ent.x;
                         const entY = (ent.pos && ent.pos.y !== undefined) ? ent.pos.y : ent.y;
                         const distanceToTarget = Math.hypot(entX - pX, entY - pY);
-
                         if (distanceToTarget <= 30) {
                             const ts = ent.totalspeed !== undefined ? ent.totalspeed : ent.totalSpeed;
                             const s = ent.speed;
                             const invuln = ent.IsInvulnerable || ent.isInvulnerable || ent.invulnerable;
                             const hasTargetSpeed = (ts === 0 || ts === 30 || ts === 60 || ts === 90 || ts === 120 || (ts === 150 && s !== 150));
-
-                            if (hasTargetSpeed && invuln) {
-                                isPlayerSticky = true;
-                            }
+                            if (hasTargetSpeed && invuln) isPlayerSticky = true;
                         }
                     });
                 }
@@ -525,91 +429,131 @@
             } catch (e) { }
         }
 
-        if (currentDist > mouseDistFullStrength) {
-            dirX *= mouseDistFullStrength / currentDist;
-            dirY *= mouseDistFullStrength / currentDist;
-        }
+        // ================= CURRENT INPUT (from input hook, same space as cmd.x/y) =================
+        let currentDirX = 0;
+        let currentDirY = 0;
 
-        const mouseAngle = Math.atan2(dirY, dirX);
-        const mouseDistance = Math.min(mouseDistFullStrength, Math.hypot(dirX, dirY));
-
-        let distanceMovement = (mouseDistance / mouseDistFullStrength) * finalMovementSpeed;
-        if (isShiftPressed || player.shift) {
-            distanceMovement *= 0.5;
-        }
-
-        let d_x = 0;
-        let d_y = 0;
-
-        const trackedMagnitude = Math.hypot(playerVx, playerVy);
-        let prevMoved = [0, 0];
-        if (trackedMagnitude > 0.05) {
-            prevMoved = [playerVx, playerVy];
-        } else if (player.distance_moved_previously) {
-            prevMoved = [player.distance_moved_previously[0] || 0, player.distance_moved_previously[1] || 0];
-        }
-
-        // Convert speed from units/second to units/tick (60 ticks per second)
-        const ticksPerSecond = 60;
-        const velocityPerTick = distanceMovement / ticksPerSecond;
-
-        if (zoneFriction > 0) {
-            const cosA = Math.cos(mouseAngle);
-            const sinA = Math.sin(mouseAngle);
-
-            d_x = cosA * velocityPerTick;
-            d_y = sinA * velocityPerTick;
-
-            if (Math.abs(d_x) > 0 && Math.abs(d_x) < zoneFriction) d_x = 0;
-            if (Math.abs(d_y) > 0 && Math.abs(d_y) < zoneFriction) d_y = 0;
-
-            // Независимый клип по осям как в игре
-            const abs_d_x = Math.abs(d_x);
-            const abs_d_y = Math.abs(d_y);
-
-            if (abs_d_x > velocityPerTick) {
-                d_x *= velocityPerTick / abs_d_x;
-            }
-            if (abs_d_y > velocityPerTick) {
-                d_y *= velocityPerTick / abs_d_y;
-            }
-        } else {
-            // Slippery / Ice logic
-            const icePerTick = currentIceSpeed / ticksPerSecond;
-            const prevMagnitude = Math.hypot(prevMoved[0], prevMoved[1]);
-
-            if (prevMagnitude > 0.05) {
-                d_x = (prevMoved[0] / prevMagnitude) * icePerTick;
-                d_y = (prevMoved[1] / prevMagnitude) * icePerTick;
+        if (hasMouseControl) {
+            const lastMd = window._client._lastMouseDownPos;
+            if (lastMd) {
+                currentDirX = lastMd.x;
+                currentDirY = lastMd.y;
             } else {
-                d_x = Math.cos(mouseAngle) * icePerTick;
-                d_y = Math.sin(mouseAngle) * icePerTick;
+                // Fallback: canvas-based calculation only if hook hasn't fired yet
+                const canvasRect = document.querySelector('canvas')?.getBoundingClientRect();
+                const screenCenterX = canvasRect ? canvasRect.width / 2 : window.innerWidth / 2;
+                const screenCenterY = canvasRect ? canvasRect.height / 2 : window.innerHeight / 2;
+                const mouseCanvasX = currentMouseX - (canvasRect ? canvasRect.left : 0);
+                const mouseCanvasY = currentMouseY - (canvasRect ? canvasRect.top : 0);
+                currentDirX = mouseCanvasX - screenCenterX;
+                currentDirY = mouseCanvasY - screenCenterY;
             }
         }
 
-        let stepX = d_x;
-        let stepY = d_y;
+        // ================= COMMAND REPLAY OFFSET =================
+        const acked = window._client.selfAcked;
+        const history = window._client.selfCmdHistory || [];
+        const pending = acked ? history.filter(cmd => cmd.seq > acked.seq) : [];
 
-        stepX += aura.pullX;
-        stepY += aura.pullY;
+        // Smooth pending tick count (faster 0.65/0.35 for high ping stability)
+        const rawPendingTicks = pending.length + 1;
+        if (window.__smoothPendingTicks == null) window.__smoothPendingTicks = rawPendingTicks;
+        window.__smoothPendingTicks += (rawPendingTicks - window.__smoothPendingTicks) * 0.35;
 
-        predictedStepsX.push(stepX);
-        predictedStepsY.push(stepY);
+        const integerTicks = Math.floor(window.__smoothPendingTicks);
+        const fractionalPart = window.__smoothPendingTicks - integerTicks;
 
-        while (predictedStepsX.length > PREDICT_TICKS) {
-            predictedStepsX.shift();
-            predictedStepsY.shift();
+        // Build input sequence
+        const inputsToReplay = pending.map(cmd => ({ x: cmd.x, y: cmd.y }));
+
+        // Determine the input state for padding future ticks.
+        // If mouse is held, assume we keep holding it. If released, assume we keep it released (coast).
+        const padInput = hasMouseControl ? { x: currentDirX, y: currentDirY } : { x: 0, y: 0 };
+        inputsToReplay.push(padInput);
+
+        // Pad extra ticks to cover the smoothing prediction window without falsely simulating mouse release
+        while (inputsToReplay.length < integerTicks + 2) {
+            inputsToReplay.push(padInput);
         }
 
-        let totalOffsetX = 0;
-        let totalOffsetY = 0;
-        for (let i = 0; i < predictedStepsX.length; i++) {
-            totalOffsetX += predictedStepsX[i];
-            totalOffsetY += predictedStepsY[i];
+        let x = pX;
+        let y = pY;
+
+        if (!window.__predVelState) window.__predVelState = { vx: 0, vy: 0 };
+        let lastVx = window.__predVelState.vx;
+        let lastVy = window.__predVelState.vy;
+        let finalStepVx = lastVx;
+        let finalStepVy = lastVy;
+
+        let lastActiveStepX = 0;
+        let lastActiveStepY = 0;
+
+        const maxTicksToProcess = integerTicks + 1;
+        for (let i = 0; i < maxTicksToProcess; i++) {
+            const input = inputsToReplay[i];
+            const mag = Math.hypot(input.x || 0, input.y || 0);
+
+            let stepX = 0;
+            let stepY = 0;
+
+            if (mag < 1) {
+                // COAST TICK — friction clip applies here
+                const coastFactor = 1 - zoneFriction;
+                lastVx *= coastFactor;
+                lastVy *= coastFactor;
+                if (Math.abs(lastVx) > 0 && Math.abs(lastVx) < zoneFriction) lastVx = 0;
+                if (Math.abs(lastVy) > 0 && Math.abs(lastVy) < zoneFriction) lastVy = 0;
+                stepX = lastVx;
+                stepY = lastVy;
+            } else {
+                // ACTIVE TICK — no friction clip
+                const ux = input.x / mag;
+                const uy = input.y / mag;
+                const moveScale = Math.min(1, mag / 150);
+                const velocityPerTick = finalMovementSpeed / 60;
+                const distancePerTick = velocityPerTick * moveScale;
+
+                stepX = ux * distancePerTick;
+                stepY = uy * distancePerTick;
+
+                if (zoneFriction > 0) {
+                    const absStepX = Math.abs(stepX);
+                    const absStepY = Math.abs(stepY);
+                    if (absStepX > velocityPerTick) stepX *= velocityPerTick / absStepX;
+                    if (absStepY > velocityPerTick) stepY *= velocityPerTick / absStepY;
+                } else {
+                    const icePerTick = currentIceSpeed / 60;
+                    const prevMag = Math.hypot(lastVx, lastVy);
+                    if (prevMag > 0.05) {
+                        stepX = (lastVx / prevMag) * icePerTick;
+                        stepY = (lastVy / prevMag) * icePerTick;
+                    } else {
+                        stepX = ux * icePerTick;
+                        stepY = uy * icePerTick;
+                    }
+                }
+                lastVx = stepX;
+                lastVy = stepY;
+                lastActiveStepX = stepX;
+                lastActiveStepY = stepY;
+            }
+
+            finalStepVx = lastVx;
+            finalStepVy = lastVy;
+
+            const tickPullX = aura.pullX;
+            const tickPullY = aura.pullY;
+
+            if (i < integerTicks) {
+                x += stepX + tickPullX;
+                y += stepY + tickPullY;
+            } else if (i === integerTicks) {
+                x += (stepX + tickPullX) * fractionalPart;
+                y += (stepY + tickPullY) * fractionalPart;
+            }
         }
 
-        let finalX = pX + totalOffsetX;
-        let finalY = pY + totalOffsetY;
+        window.__predVelState = { vx: finalStepVx, vy: finalStepVy };
 
         if (game.area) {
             const radius = player.radius || 15;
@@ -619,7 +563,6 @@
                     zonesList = typeof game.area.zones.list === 'function' ? game.area.zones.list() : (Array.isArray(game.area.zones) ? game.area.zones : []);
                 } catch (e) { }
             }
-
             if (zonesList.length > 0) {
                 const isInsideAnyZone = (x, y) => {
                     for (let i = 0; i < zonesList.length; i++) {
@@ -631,60 +574,78 @@
                     }
                     return false;
                 };
-
                 let playerZones = [];
                 for (let i = 0; i < zonesList.length; i++) {
                     const zone = zonesList[i];
-                    if (pX >= zone.x && pX <= zone.x + zone.width &&
-                        pY >= zone.y && pY <= zone.y + zone.height) {
+                    if (pX >= zone.x && pX <= zone.x + zone.width && pY >= zone.y && pY <= zone.y + zone.height) {
                         playerZones.push(zone);
                     }
                 }
                 if (playerZones.length === 0) {
                     playerZones.push({ x: 0, y: 0, width: game.area.width || 9999, height: game.area.height || 9999 });
                 }
-
                 let currentMinX = Math.min(...playerZones.map(z => z.x));
                 let currentMaxX = Math.max(...playerZones.map(z => z.x + z.width));
                 let currentMinY = Math.min(...playerZones.map(z => z.y));
                 let currentMaxY = Math.max(...playerZones.map(z => z.y + z.height));
 
-                if (totalOffsetX > 0) {
-                    if (!isInsideAnyZone(finalX + radius, pY)) finalX = Math.min(finalX, currentMaxX - radius);
-                } else if (totalOffsetX < 0) {
-                    if (!isInsideAnyZone(finalX - radius, pY)) finalX = Math.max(finalX, currentMinX + radius);
+                if (x - pX > 0) {
+                    if (!isInsideAnyZone(x + radius, pY)) x = Math.min(x, currentMaxX - radius);
+                } else if (x - pX < 0) {
+                    if (!isInsideAnyZone(x - radius, pY)) x = Math.max(x, currentMinX + radius);
                 }
-
-                if (totalOffsetY > 0) {
-                    if (!isInsideAnyZone(pX, finalY + radius)) finalY = Math.min(finalY, currentMaxY - radius);
-                } else if (totalOffsetY < 0) {
-                    if (!isInsideAnyZone(pX, finalY - radius)) finalY = Math.max(finalY, currentMinY + radius);
+                if (y - pY > 0) {
+                    if (!isInsideAnyZone(pX, y + radius)) y = Math.min(y, currentMaxY - radius);
+                } else if (y - pY < 0) {
+                    if (!isInsideAnyZone(pX, y - radius)) y = Math.max(y, currentMinY + radius);
                 }
             } else {
                 const maxWidth = game.area.width || 0;
                 const maxHeight = game.area.height || 0;
-                if (maxWidth > 0) finalX = Math.max(radius, Math.min(maxWidth - radius, finalX));
-                if (maxHeight > 0) finalY = Math.max(radius, Math.min(maxHeight - radius, finalY));
+                if (maxWidth > 0) x = Math.max(radius, Math.min(maxWidth - radius, x));
+                if (maxHeight > 0) y = Math.max(radius, Math.min(maxHeight - radius, y));
             }
         }
 
+        // ================= OUTPUT SMOOTHING =================
+        if (window.__smoothPredX === undefined) {
+            window.__smoothPredX = x;
+            window.__smoothPredY = y;
+        }
+        window.__smoothPredX += (x - window.__smoothPredX) * 0.7;
+        window.__smoothPredY += (y - window.__smoothPredY) * 0.7;
+
+        const finalX = window.__smoothPredX;
+        const finalY = window.__smoothPredY;
+
+        window.__predictData = { x: finalX, y: finalY, time: performance.now() };
+
+        // ================= DEBUG OVERLAY =================
         if (isDebugVisible) {
+            const currentDist = Math.hypot(currentDirX, currentDirY);
+            const mouseAngle = Math.atan2(currentDirY, currentDirX);
+            const cursorSpeed = (Math.min(1, currentDist / 150)) * finalMovementSpeed;
+
             let moveAngle = 0;
-            if (Math.hypot(avgPlayerVx, avgPlayerVy) > 0.05) {
-                moveAngle = Math.atan2(avgPlayerVy, avgPlayerVx) * (180 / Math.PI);
+            const avgMag = Math.hypot(finalStepVx, finalStepVy);
+            if (avgMag > 0.05) {
+                moveAngle = Math.atan2(finalStepVy, finalStepVx) * (180 / Math.PI);
                 if (moveAngle < 0) moveAngle += 360;
             }
             let targetAngle = mouseAngle * (180 / Math.PI);
             if (targetAngle < 0) targetAngle += 360;
 
-            updateDebugUI(baseSpeed, additionalSpeed, finalMovementSpeed, effectiveSlow, isVoid, (zoneFriction === 0), player.voidTime || 0, player.isIced === true, isMagmaxAbilityActive, isNightActive, maxPoisonTicks, mouseDistFullStrength, distanceMovement, currentDist, aura.pullX, aura.pullY, PREDICT_TICKS, avgPlayerVx, avgPlayerVy, stepX * 60, stepY * 60, moveAngle, targetAngle);
+            updateDebugUI(
+                baseSpeed, additionalSpeed, finalMovementSpeed, effectiveSlow,
+                false, (zoneFriction === 0), 0,
+                player.isIced === true, isMagmaxAbilityActive, isNightActive,
+                maxPoisonTicks, 150, cursorSpeed, currentDist,
+                aura.pullX, aura.pullY, window.__smoothPendingTicks,
+                finalStepVx * 60, finalStepVy * 60,
+                finalStepVx * 60, finalStepVy * 60,
+                moveAngle, targetAngle
+            );
         }
-
-        window.__predictData = {
-            x: finalX,
-            y: finalY,
-            time: performance.now()
-        };
 
         return { x: finalX, y: finalY };
     }

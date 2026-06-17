@@ -107,7 +107,8 @@
     window._client.onMessage = (msg) => {
         if (!msg.entities) msg.entities = [];
 
-        let me = msg?.globalEntities?.find(e => e.id === window._client.user?.self?.id);
+        const game = getGameRef();
+        let me = msg?.globalEntities?.find(e => e.id === game?.gameState?.selfId);
 
         if (me) {
             if (msg.sequence != null && typeof me.x === 'number' && typeof me.y === 'number') {
@@ -120,7 +121,7 @@
             }
         }
 
-        if (window._client.selfCmdHistory) {
+        if (msg.sequence != null && window._client.selfCmdHistory) {
             window._client.selfCmdHistory = window._client.selfCmdHistory.filter(
                 cmd => cmd.seq > msg.sequence
             );
@@ -143,7 +144,6 @@
         if (msg.pong) return; // Skip ping messages
         if (!isOverlayEnabled) return;
         if (msg.area) {
-            const game = getGameRef();
             if (game?.gameState?.entities) {
                 for (const id of Object.keys(game.gameState.entities)) {
                     if (Number(id) < 0) {
@@ -211,7 +211,9 @@
 
     function updateEnemyPrediction(enemies) {
         const now = performance.now();
-        const predMs = window._client.ping + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
+        const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
+        const hybridPredMs = (window.__smoothPendingTicks > 0 ? window.__smoothPendingTicks * SERVER_TICK_MS : basePredMs);
+        const predMs = hybridPredMs + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
         for (const e of enemies) {
             if (!e._evadeLastPos) {
                 e._evadeLastPos = { x: e.x, y: e.y };
@@ -463,7 +465,9 @@
             }
         } catch (e) { }
 
-        const predMs = window._client.ping + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
+        const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
+        const hybridPredMs = (window.__smoothPendingTicks > 0 ? window.__smoothPendingTicks * SERVER_TICK_MS : basePredMs);
+        const predMs = hybridPredMs + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
         precomputeTrajectories(enemies, predMs, bounceZones);
 
         for (const [id, ent] of Object.entries(gameState.entities)) {
@@ -490,7 +494,7 @@
                 }
 
                 const clone = Object.assign({}, ent, {
-                    id: -numericId - CLONE_OFFSET, // Fixed: Using CLONE_OFFSET to ensure id is strictly negative, even when numericId === 0
+                    id: -numericId - CLONE_OFFSET, // Using CLONE_OFFSET to ensure id is strictly negative, even when numericId === 0
                     x: predX,
                     y: predY,
                     isDestroyed: false,
