@@ -25,30 +25,15 @@
     let poisonGhostTimer = 0;
     let poisonSniperTimer = 0;
 
-    // Массивы для хранения истории сдвигов (динамический размер)
-    let predictedStepsX = [];
-    let predictedStepsY = [];
     let PREDICT_TICKS = 6;
 
     // ГЛОБАЛЬНЫЕ ДЛЯ СКРИПТА ПЕРЕМЕННЫЕ
     const entityVelocities = new Map();
     let lastAuraCheckTime = performance.now();
 
-    // Независимый трекер реальной скорости игрока для фикса Slippery/Ice физики
-    let lastPlayerX = null;
-    let lastPlayerY = null;
-    let playerVx = 0;
-    let playerVy = 0;
-    let lastPlayerVelocityTime = performance.now();
-    let playerVxHistory = [];
-    let playerVyHistory = [];
-
     // Отслеживание мыши и Shift в реальном времени
     let currentMouseX = window.innerWidth / 2;
     let currentMouseY = window.innerHeight / 2;
-    let isShiftPressed = false;
-    let lastActiveStepX = 0;
-    let lastActiveStepY = 0;
 
     // Создание HTML-панели дебага
     const debugDiv = document.createElement('div');
@@ -80,8 +65,6 @@
     });
 
     window.addEventListener('keydown', (e) => {
-        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') isShiftPressed = true;
-
         if (e.key === 'Home' || e.code === 'Home') {
             isDebugVisible = !isDebugVisible;
             debugDiv.style.display = isDebugVisible ? 'block' : 'none';
@@ -94,10 +77,6 @@
                 isMagmaxAbilityActive = !isMagmaxAbilityActive;
             }
         }
-    });
-
-    window.addEventListener('keyup', (e) => {
-        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') isShiftPressed = false;
     });
 
     // Универсальный безопасный итератор для любых типов коллекций (Map, Array, Object)
@@ -485,9 +464,6 @@
         let finalStepVx = lastVx;
         let finalStepVy = lastVy;
 
-        let lastActiveStepX = 0;
-        let lastActiveStepY = 0;
-
         const maxTicksToProcess = integerTicks + 1;
         for (let i = 0; i < maxTicksToProcess; i++) {
             const input = inputsToReplay[i];
@@ -534,8 +510,6 @@
                 }
                 lastVx = stepX;
                 lastVy = stepY;
-                lastActiveStepX = stepX;
-                lastActiveStepY = stepY;
             }
 
             finalStepVx = lastVx;

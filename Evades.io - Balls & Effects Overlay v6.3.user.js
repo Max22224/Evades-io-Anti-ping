@@ -24,23 +24,7 @@
     const CLONE_OFFSET = 10000000; // Fixed: Offset to handle entity id === 0 correctly
 
     // ==================== BALL TYPE CONFIGURATION ====================
-    const ALLOWED_PROJECTILES = new Set([18, 33, 79, 83, 108, 145, 147, 186, 215]);
     const _ignoredTypes = new Set([62, 72, 199, 8]);
-    const DEFAULT_PROJECTILES = new Set([
-        1, 4, 7, 14, 15, 21, 32, 35, 37, 38, 40, 46, 54, 56, 59, 62, 70, 72, 75, 82, 85, 86, 96, 99,
-        103, 106, 109, 116, 122, 123, 126, 129, 133, 135, 136, 137, 141, 148, 149, 150, 151, 152, 153,
-        154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 166, 168, 169, 170, 172, 173, 174, 178,
-        179, 185, 190, 191, 194, 198, 213, 222, 224, 226, 234
-    ]);
-    //type 52 is flower "projectile" that can go out of bounds and have 0 speed because its on flower enemy with id 51)
-    const EXCLUDED_OTHERS = new Set([30, 43, 44, 71, 197, 200, 227, 228, 229]);
-
-    function canBounce(type) {
-        if (ALLOWED_PROJECTILES.has(type)) return true;
-        if (DEFAULT_PROJECTILES.has(type)) return false;
-        if (EXCLUDED_OTHERS.has(type)) return false;
-        return true;
-    }
 
     // ==================== Main Input / Output Hook ====================
     window._client = window._client || {};
@@ -169,8 +153,6 @@
     let originalProps = new Map();
     let originalVisibility = new Map();
     let originalSelfProps = null;
-    let ballVelocities = new Map();
-    let ballAuras = new Map();
     let gloopOriginalRenders = new Map();
 
     // ==================== CONFIG & GLOBALS FOR PREDICTION ====================
@@ -516,64 +498,6 @@
         }
     };
 
-    // ========== DYNAMIC BALL SPEED CALCULATION ==========
-    function getBallTrackedState(id, currentX, currentY, now, type) {
-        let state = ballVelocities.get(id);
-        if (!state) {
-            state = {
-                vx: 0,
-                vy: 0,
-                lastX: currentX,
-                lastY: currentY,
-                updatedAt: now,
-                visualX: currentX,
-                visualY: currentY,
-                lastFrameAt: now
-            };
-            ballVelocities.set(id, state);
-            return state;
-        }
-
-        if (currentX !== state.lastX || currentY !== state.lastY) {
-            const dt = (now - state.updatedAt) / 1000;
-
-            if (dt > 0.005 && dt < 0.5) {
-                const rawVx = (currentX - state.lastX) / dt;
-                const rawVy = (currentY - state.lastY) / dt;
-
-                if (canBounce(type)) {
-                    if (Math.sign(rawVx) !== Math.sign(state.vx) && Math.abs(rawVx) > 10) {
-                        state.vx = rawVx;
-                    } else {
-                        const filter = 0.15;
-                        state.vx = state.vx * (1 - filter) + rawVx * filter;
-                    }
-
-                    if (Math.sign(rawVy) !== Math.sign(state.vy) && Math.abs(rawVy) > 10) {
-                        state.vy = rawVy;
-                    } else {
-                        const filter = 0.15;
-                        state.vy = state.vy * (1 - filter) + rawVy * filter;
-                    }
-                } else {
-                    const filter = 0.15;
-                    state.vx = state.vx * (1 - filter) + rawVx * filter;
-                    state.vy = state.vy * (1 - filter) + rawVy * filter;
-                }
-
-                const speed = Math.hypot(state.vx, state.vy);
-                if (speed > 2500) {
-                    state.vx = (state.vx / speed) * 2500;
-                    state.vy = (state.vy / speed) * 2500;
-                }
-            }
-            state.lastX = currentX;
-            state.lastY = currentY;
-            state.updatedAt = now;
-        }
-        return state;
-    }
-
     function cacheIncomingAuras(game) {
         if (!game?.gameState?.entities) return;
 
@@ -589,96 +513,6 @@
                 });
             }
         }
-
-        for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            let effs = null;
-            if (originalProps.has(id) && originalProps.get(id).hasEffects) {
-                effs = originalProps.get(id).effectsData;
-            } else if (entity.effects && entity.effects.effects) {
-                effs = entity.effects.effects;
-            }
-
-            if (effs) {
-                const activeAurasForBall = {};
-                let hasEffects = false;
-                for (const key in effs) {
-                    if (Object.prototype.hasOwnProperty.call(effs, key)) {
-                        const auraData = effs[key];
-                        if (!auraData) continue;
-                        const auraType = auraData.effectType !== undefined ? auraData.effectType : auraData.type;
-                        const r = auraData.radius || auraData.currentRadius || auraData.range || auraData.auraRadius;
-                        if (auraType !== undefined && r !== undefined) {
-                            activeAurasForBall[auraType] = r;
-                            hasEffects = true;
-                        }
-                    }
-                }
-                if (hasEffects) {
-                    ballAuras.set(id, activeAurasForBall);
-                } else {
-                    ballAuras.delete(id);
-                }
-            } else {
-                ballAuras.delete(id);
-            }
-        }
-    }
-
-    function getAllBalls(gameState, player, now) {
-        const balls = [];
-        if (!gameState?.entities || !player) return balls;
-
-        for (const [id, entity] of Object.entries(gameState.entities)) {
-            if (id === gameState.selfId) continue;
-            if (entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113) continue;
-            if ((entity.name || '').toLowerCase().includes('switch') || entity.entityType === 130) continue;
-            if (entity.entityType === 136) continue;
-
-            if (entity.radius && entity.radius > 0) {
-                let alpha = 1;
-
-                if (!isHideOriginalEnabled) {
-                    if (entity.currentTransparency !== undefined && entity.currentTransparency < 1) {
-                        alpha = entity.currentTransparency;
-                    } else if (entity.alpha !== undefined && entity.alpha < 1) {
-                        alpha = entity.alpha;
-                    }
-                }
-
-                const name = (entity.name || '').toLowerCase();
-                if (name.includes('ghost')) alpha = GHOST_ALPHA;
-                else if (entity.harmless === 1 || entity.isHarmless === true || entity.harmlessTime > 0) alpha = HARMLESS_ALPHA;
-                else if (entity.grassHarmless === true || entity.grassharmless === true) alpha = GRASSHARMLESS_ALPHA;
-
-                const type = entity.entityType !== undefined ? entity.entityType : entity.type;
-                const trackedState = getBallTrackedState(id, entity.x, entity.y, now, type);
-                const hasVelocity = Math.abs(trackedState.vx) > 10 || Math.abs(trackedState.vy) > 10;
-
-                balls.push({
-                    id: id,
-                    rawX: entity.x,
-                    rawY: entity.y,
-                    radius: entity.radius,
-                    color: entity.color || '#FFFFFF',
-                    type: type,
-                    alpha: alpha,
-                    isType59: type === 59,
-                    isType52: type === 52,
-                    isDripping: name.includes('drip'),
-                    hasVelocity: hasVelocity,
-                    trackedState: trackedState
-                });
-            }
-        }
-
-        balls.sort((a, b) => {
-            if (a.isType59 && !b.isType59) return -1;
-            if (!a.isType59 && b.isType59) return 1;
-            if (a.isType52 && !b.isType52) return 1;
-            if (!a.isType52 && b.isType52) return -1;
-            return b.radius - a.radius;
-        });
-        return balls;
     }
 
     // ========== OVERLAY RENDERING ==========
@@ -689,7 +523,6 @@
 
         if (!gameState || !camera || !player) return;
 
-        const balls = getAllBalls(gameState, player, now);
         const scale = camera.originalGameScale || camera.scale || 1;
         const left = camera.left || (camera.x - canvas.width / (2 * scale));
         const top = camera.top || (camera.y - canvas.height / (2 * scale));
@@ -925,8 +758,6 @@
             }
 
             currentArea = game.area;
-            ballVelocities.clear();
-            ballAuras.clear();
             originalProps.clear();
             originalVisibility.clear();
             window.__gloopOffsets = [];
@@ -1065,12 +896,6 @@
         const game = getGameRef();
         if (game?.gameState?.entities) {
             const existingIds = new Set(Object.keys(game.gameState.entities));
-            for (const [id] of ballVelocities) {
-                if (!existingIds.has(id)) ballVelocities.delete(id);
-            }
-            for (const [id] of ballAuras) {
-                if (!existingIds.has(id)) ballAuras.delete(id);
-            }
             for (const [id] of originalProps) {
                 if (!existingIds.has(id)) originalProps.delete(id);
             }
