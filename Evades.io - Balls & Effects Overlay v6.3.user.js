@@ -13,9 +13,6 @@
     'use strict';
 
     // ==================== GRAPHICS SETTINGS ====================
-    const GHOST_ALPHA = 0.13;
-    const HARMLESS_ALPHA = 0.13;
-    const GRASSHARMLESS_ALPHA = 0.13;
     const DEFAULT_PLAYER_RADIUS = 15;
     const PLAYER_ALPHA = 0.7;
 
@@ -439,13 +436,11 @@
         updateEnemyPrediction(enemies);
 
         let bounceZones = [];
-        try {
-            if (game.area && game.area.zones) {
-                bounceZones = typeof game.area.zones.list === 'function'
-                    ? game.area.zones.list()
-                    : (Array.isArray(game.area.zones) ? game.area.zones : []);
-            }
-        } catch (e) { }
+        if (game.area && game.area.zones) {
+            let rawZones = game.area.zones.list()
+            // Zone type 0 is where enemies are active and bounce
+            bounceZones = rawZones.filter(z => z.type === 0);
+        }
 
         const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
         const hybridPredMs = (window.__smoothPendingTicks > 0 ? window.__smoothPendingTicks * SERVER_TICK_MS : basePredMs);

@@ -131,6 +131,7 @@
 
         const pX = futurePx !== undefined ? futurePx : ((player.pos && player.pos.x !== undefined) ? player.pos.x : player.x);
         const pY = futurePy !== undefined ? futurePy : ((player.pos && player.pos.y !== undefined) ? player.pos.y : player.y);
+        const pRadPx = player.radius || 15;
 
         const now = performance.now();
         const dt = (now - lastAuraCheckTime) / 1000;
@@ -196,8 +197,8 @@
                         if (effRadius) currentAuraSize = effRadius;
                         if (eff.repulsion) repulsionForce = eff.repulsion;
                     }
-
-                    if (effRadius && dist < effRadius) {
+                    // Check first contact: player edge touches aura edge (dist <= playerRadius + effRadius)
+                    if (effRadius && dist < effRadius + pRadPx) {
                         if (effType == 48) aura.slow = Math.max(aura.slow, 0.3);
                         else if (effType == 70) aura.slow = Math.max(aura.slow, 0.2);
                         else if (effType == 52) aura.slow = Math.max(aura.slow, 0.85);
@@ -206,7 +207,6 @@
                 }
             }
 
-            const pRadPx = player.radius || 15;
             if (isGravity || isRepelling) {
                 if (dist <= (pRadPx + currentAuraSize)) {
                     const isInvuln = typeof player.isInvulnerable === 'function' ? player.isInvulnerable() : (player.isInvulnerable || player.invulnerable);
@@ -250,6 +250,23 @@
         if (player.debuffs) safeForEach(player.debuffs, checkPlayerEffect);
 
         return aura;
+    }
+
+    function isPlayerInSafeZone(player, game) {
+        const pX = (player.pos && player.pos.x !== undefined) ? player.pos.x : player.x;
+        const pY = (player.pos && player.pos.y !== undefined) ? player.pos.y : player.y;
+
+        let zonesList = game.area.zones.list();
+
+        for (const zone of zonesList) {
+            if (zone.type === 4) {
+                if (pX >= zone.x && pX <= zone.x + zone.width &&
+                    pY >= zone.y && pY <= zone.y + zone.height) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     function getSmoothCameraPrediction(player, game) {
@@ -334,6 +351,15 @@
         // ================= AURA & SPEED CALCULATION =================
         const aura = getActiveAuras(player, game, pX, pY);
 
+        // ================= SAFE ZONE LOGIC =================
+        const inSafeZone = isPlayerInSafeZone(player, game);
+        if (inSafeZone) {
+            aura.slow = 0;
+            aura.slippery = false;
+            aura.pullX = 0;
+            aura.pullY = 0;
+        }
+
         if (aura.slippery || player.slippery) {
             zoneFriction = 0;
         }
@@ -379,6 +405,12 @@
         }
 
         let finalMovementSpeed = baseSpeed + additionalSpeed;
+
+        // In safe zones, minimum speed is 10 (300 units per second)
+        if (inSafeZone && finalMovementSpeed < 300) {
+            finalMovementSpeed = 300;
+        }
+
         const iceSpeed = player.calculateSpeedChanges ? player.calculateSpeedChanges(player.speed) : (player.speed || 0);
         let currentIceSpeed = iceSpeed;
         if (baseSpeed === 0 && additionalSpeed > 0) currentIceSpeed = additionalSpeed;
@@ -531,16 +563,30 @@
 
         if (game.area) {
             const radius = player.radius || 15;
-            let zonesList = [];
+            let rawZones = [];
+            let walkableZones = [];
             if (game.area.zones) {
-                try {
-                    zonesList = typeof game.area.zones.list === 'function' ? game.area.zones.list() : (Array.isArray(game.area.zones) ? game.area.zones : []);
-                } catch (e) { }
+                // Only consider walkable zone types (0=active, 2=exit (area switches (area 1->2)), 4=safe, 5=teleport (map switches), 6=victory) for player boundary logic
+                const _walkableTypeSet = new Set([0, 4, 6]);
+                rawZones = game.area.zones.list();
+                walkableZones = rawZones.filter(z => _walkableTypeSet.has(z.type));
             }
-            if (zonesList.length > 0) {
-                const isInsideAnyZone = (x, y) => {
-                    for (let i = 0; i < zonesList.length; i++) {
-                        const zone = zonesList[i];
+            let playerZones = [];
+            for (let i = 0; i < rawZones.length; i++) {
+                const zone = rawZones[i];
+                if (pX >= zone.x && pX <= zone.x + zone.width && pY >= zone.y && pY <= zone.y + zone.height) {
+                    playerZones.push(zone);
+                }
+            }
+
+            if (playerZones.length === 0) {
+                playerZones.push({ x: 0, y: 0, width: game.area.width || 9999, height: game.area.height || 9999 });
+            }
+
+            if (walkableZones.length > 0) {
+                const isInsideWalkableZone = (x, y) => {
+                    for (let i = 0; i < walkableZones.length; i++) {
+                        const zone = walkableZones[i];
                         if (x >= zone.x && x <= zone.x + zone.width &&
                             y >= zone.y && y <= zone.y + zone.height) {
                             return true;
@@ -548,36 +594,41 @@
                     }
                     return false;
                 };
-                let playerZones = [];
-                for (let i = 0; i < zonesList.length; i++) {
-                    const zone = zonesList[i];
-                    if (pX >= zone.x && pX <= zone.x + zone.width && pY >= zone.y && pY <= zone.y + zone.height) {
-                        playerZones.push(zone);
-                    }
-                }
-                if (playerZones.length === 0) {
-                    playerZones.push({ x: 0, y: 0, width: game.area.width || 9999, height: game.area.height || 9999 });
-                }
+
                 let currentMinX = Math.min(...playerZones.map(z => z.x));
                 let currentMaxX = Math.max(...playerZones.map(z => z.x + z.width));
                 let currentMinY = Math.min(...playerZones.map(z => z.y));
                 let currentMaxY = Math.max(...playerZones.map(z => z.y + z.height));
 
                 if (x - pX > 0) {
-                    if (!isInsideAnyZone(x + radius, pY)) x = Math.min(x, currentMaxX - radius);
+                    if (!isInsideWalkableZone(x + radius, pY)) x = Math.min(x, currentMaxX - radius);
                 } else if (x - pX < 0) {
-                    if (!isInsideAnyZone(x - radius, pY)) x = Math.max(x, currentMinX + radius);
+                    if (!isInsideWalkableZone(x - radius, pY)) x = Math.max(x, currentMinX + radius);
                 }
                 if (y - pY > 0) {
-                    if (!isInsideAnyZone(pX, y + radius)) y = Math.min(y, currentMaxY - radius);
+                    if (!isInsideWalkableZone(pX, y + radius)) y = Math.min(y, currentMaxY - radius);
                 } else if (y - pY < 0) {
-                    if (!isInsideAnyZone(pX, y - radius)) y = Math.max(y, currentMinY + radius);
+                    if (!isInsideWalkableZone(pX, y - radius)) y = Math.max(y, currentMinY + radius);
                 }
             } else {
                 const maxWidth = game.area.width || 0;
                 const maxHeight = game.area.height || 0;
                 if (maxWidth > 0) x = Math.max(radius, Math.min(maxWidth - radius, x));
                 if (maxHeight > 0) y = Math.max(radius, Math.min(maxHeight - radius, y));
+            }
+        }
+
+        // ================= TELEPORT / MAP CHANGE SNAP =================
+        // If the player position suddenly jumps (teleporter, map change, respawn),
+        // force the smoothing variables to snap instantly to prevent the camera from flying through the void.
+        if (window.__smoothPredX !== undefined) {
+            const jumpDist = Math.hypot(pX - window.__smoothPredX, pY - window.__smoothPredY);
+            if (jumpDist > 150) { // Threshold for a teleport/server snap
+                window.__smoothPredX = pX;
+                window.__smoothPredY = pY;
+                window.__predVelState = { vx: 0, vy: 0 };
+                x = pX;
+                y = pY;
             }
         }
 
