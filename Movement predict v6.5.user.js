@@ -348,37 +348,10 @@
             }
         } catch (err) { }
 
-        // ================= AURA & SPEED CALCULATION =================
-        const aura = getActiveAuras(player, game, pX, pY);
-
-        // ================= SAFE ZONE LOGIC =================
-        const inSafeZone = isPlayerInSafeZone(player, game);
-        if (inSafeZone) {
-            aura.slow = 0;
-            aura.slippery = false;
-            aura.pullX = 0;
-            aura.pullY = 0;
-        }
-
-        if (aura.slippery || player.slippery) {
-            zoneFriction = 0;
-        }
-
-        let baseSpeed = player.calculateSpeed ? player.calculateSpeed(0) : (player.speed || 0);
+        // ================= POSITION-INDEPENDENT SPEED SETUP =================
+        let rawBaseSpeed = player.calculateSpeed ? player.calculateSpeed(0) : (player.speed || 0);
         const maxPoisonTicks = Math.max(poisonGhostTimer, poisonSniperTimer);
-        if (maxPoisonTicks > 0) baseSpeed *= 3;
-
-        let effectiveSlow = 0;
-        if (player.isIced === true) {
-            baseSpeed = 0;
-        } else {
-            let slowReduction = 0;
-            if (player.mutatiorbBuffEffectsReduction === true) {
-                slowReduction = (player.heroType == 10) ? 0.60 : 0.40;
-            }
-            effectiveSlow = aura.slow * (1 - slowReduction);
-            baseSpeed *= (1 - Math.min(1, Math.max(0, effectiveSlow)));
-        }
+        if (maxPoisonTicks > 0) rawBaseSpeed *= 3;
 
         let additionalSpeed = 0;
         if (player.mutatiorbBuffSpeedBoost === true) additionalSpeed += (player.heroType == 10) ? 90 : 60;
@@ -404,22 +377,14 @@
             }
         }
 
-        let finalMovementSpeed = baseSpeed + additionalSpeed;
-
-        // In safe zones, minimum speed is 10 (300 units per second)
-        if (inSafeZone && finalMovementSpeed < 300) {
-            finalMovementSpeed = 300;
-        }
-
         const iceSpeed = player.calculateSpeedChanges ? player.calculateSpeedChanges(player.speed) : (player.speed || 0);
-        let currentIceSpeed = iceSpeed;
-        if (baseSpeed === 0 && additionalSpeed > 0) currentIceSpeed = additionalSpeed;
+        let baseIceSpeed = iceSpeed;
 
         const ab2 = player.abilityTwo;
+        let isStickyActive = false;
         if (ab2 && ab2.abilityType == 98 && ab2.locked === false && ab2.level === 1 && !player.isStickyCoatDisabled) {
             try {
                 const entitiesList = game.entities || game.gameState?.entities;
-                let isPlayerSticky = false;
                 if (entitiesList) {
                     safeForEach(entitiesList, (ent) => {
                         if (!ent || !ent.isPlayer) return;
@@ -432,11 +397,10 @@
                             const s = ent.speed;
                             const invuln = ent.IsInvulnerable || ent.isInvulnerable || ent.invulnerable;
                             const hasTargetSpeed = (ts === 0 || ts === 30 || ts === 60 || ts === 90 || ts === 120 || (ts === 150 && s !== 150));
-                            if (hasTargetSpeed && invuln) isPlayerSticky = true;
+                            if (hasTargetSpeed && invuln) isStickyActive = true;
                         }
                     });
                 }
-                if (isPlayerSticky) finalMovementSpeed *= 0.8;
             } catch (e) { }
         }
 
@@ -496,21 +460,62 @@
         let finalStepVx = lastVx;
         let finalStepVy = lastVy;
 
+        // Variables to hold final tick state for debug UI
+        let aura, baseSpeed, effectiveSlow, finalMovementSpeed, tickZoneFriction = zoneFriction;
+
         const maxTicksToProcess = integerTicks + 1;
         for (let i = 0; i < maxTicksToProcess; i++) {
             const input = inputsToReplay[i];
             const mag = Math.hypot(input.x || 0, input.y || 0);
+
+            // ================= POSITION-DEPENDENT AURA/SPEED CALC =================
+            const tempPlayerPos = { ...player, x: x, y: y, pos: { x: x, y: y } };
+            aura = getActiveAuras(player, game, x, y);
+            const inSafeZone = isPlayerInSafeZone(tempPlayerPos, game);
+            tickZoneFriction = zoneFriction;
+
+            if (inSafeZone) {
+                aura.slow = 0;
+                aura.slippery = false;
+                aura.pullX = 0;
+                aura.pullY = 0;
+            }
+            if (aura.slippery || player.slippery) {
+                tickZoneFriction = 0;
+            }
+
+            baseSpeed = rawBaseSpeed;
+            effectiveSlow = 0;
+            if (player.isIced === true) {
+                baseSpeed = 0;
+            } else {
+                let slowReduction = 0;
+                if (player.mutatiorbBuffEffectsReduction === true) {
+                    slowReduction = (player.heroType == 10) ? 0.60 : 0.40;
+                }
+                effectiveSlow = aura.slow * (1 - slowReduction);
+                baseSpeed *= (1 - Math.min(1, Math.max(0, effectiveSlow)));
+            }
+
+            finalMovementSpeed = baseSpeed + additionalSpeed;
+            if (inSafeZone && finalMovementSpeed < 300) {
+                finalMovementSpeed = 300;
+            }
+            if (isStickyActive) finalMovementSpeed *= 0.8;
+
+            let currentIceSpeed = baseIceSpeed;
+            if (baseSpeed === 0 && additionalSpeed > 0) currentIceSpeed = additionalSpeed;
 
             let stepX = 0;
             let stepY = 0;
 
             if (mag < 1) {
                 // COAST TICK — friction clip applies here
-                const coastFactor = 1 - zoneFriction;
+                const coastFactor = 1 - tickZoneFriction;
                 lastVx *= coastFactor;
                 lastVy *= coastFactor;
-                if (Math.abs(lastVx) > 0 && Math.abs(lastVx) < zoneFriction) lastVx = 0;
-                if (Math.abs(lastVy) > 0 && Math.abs(lastVy) < zoneFriction) lastVy = 0;
+                if (Math.abs(lastVx) > 0 && Math.abs(lastVx) < tickZoneFriction) lastVx = 0;
+                if (Math.abs(lastVy) > 0 && Math.abs(lastVy) < tickZoneFriction) lastVy = 0;
                 stepX = lastVx;
                 stepY = lastVy;
             } else {
@@ -524,7 +529,7 @@
                 stepX = ux * distancePerTick;
                 stepY = uy * distancePerTick;
 
-                if (zoneFriction > 0) {
+                if (tickZoneFriction > 0) {
                     const absStepX = Math.abs(stepX);
                     const absStepY = Math.abs(stepY);
                     if (absStepX > velocityPerTick) stepX *= velocityPerTick / absStepX;
@@ -662,7 +667,7 @@
 
             updateDebugUI(
                 baseSpeed, additionalSpeed, finalMovementSpeed, effectiveSlow,
-                false, (zoneFriction === 0), 0,
+                false, (tickZoneFriction === 0), 0,
                 player.isIced === true, isMagmaxAbilityActive, isNightActive,
                 maxPoisonTicks, 150, cursorSpeed, currentDist,
                 aura.pullX, aura.pullY, window.__smoothPendingTicks,

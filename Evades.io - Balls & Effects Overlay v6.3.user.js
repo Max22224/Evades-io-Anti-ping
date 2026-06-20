@@ -144,7 +144,6 @@
     let isPredictPlayerEnabled = true;
     let isExtraTickDelayEnabled = false;
     let isUIVisible = true;
-    let isExtrapolationEnabled = true;
 
     let currentArea = null;
     let originalProps = new Map();
@@ -453,7 +452,7 @@
 
             const hasVelocity = Math.abs(ent._vxMs) > 0.0001 || Math.abs(ent._vyMs) > 0.0001;
 
-            if (isExtrapolationEnabled && hasVelocity) {
+            if (hasVelocity) {
                 let predX, predY;
 
                 if (ent._trajValid && ent._trajectory) {
@@ -784,7 +783,7 @@
 
                             const hasVelocity = Math.abs(originalEnt._vxMs) > 0.0001 || Math.abs(originalEnt._vyMs) > 0.0001;
 
-                            if (isExtrapolationEnabled && hasVelocity) {
+                            if (hasVelocity) {
                                 cloneEnt.isDestroyed = false;
                                 cloneEnt.currentTransparency = 1;
                                 if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
@@ -824,15 +823,10 @@
         return btn;
     }
 
-    const overlayBtn = createBtn(60, '🎨 OVERLAY [ON]', '#0f0', () => {
+    const overlayBtn = createBtn(60, '🎨 Scripts [ON]', '#0f0', () => {
         isOverlayEnabled = !isOverlayEnabled;
-
+        window.toggleCam()
         if (!isOverlayEnabled) {
-            isExtrapolationEnabled = false;
-            isHideOriginalEnabled = false;
-            isHideSelfEnabled = false;
-            isPredictPlayerEnabled = false;
-
             const game = getGameRef();
             if (game) {
                 restoreOriginalBalls(game);
@@ -848,8 +842,6 @@
             }
             originalVisibility.clear();
             originalProps.clear();
-        } else {
-            isExtrapolationEnabled = true;
         }
 
         overlayBtn.innerHTML = `🎨 OVERLAY [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
