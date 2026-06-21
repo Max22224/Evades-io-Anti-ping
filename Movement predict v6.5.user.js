@@ -138,7 +138,7 @@
         const isValidDt = dt > 0.005 && dt < 0.5;
 
         for (const [entId, ent] of Object.entries(entities)) {
-            if (!ent || ent === player) continue;
+            if (!ent || ent === player || Number(entId) > 0) continue;
 
             const currentEntX = (ent.pos && ent.pos.x !== undefined) ? ent.pos.x : ent.x;
             const currentEntY = (ent.pos && ent.pos.y !== undefined) ? ent.pos.y : ent.y;
@@ -303,7 +303,6 @@
         // ================= HARD RESET =================
         if (isDead || isVoid) {
             window.__predVelState = { vx: 0, vy: 0 };
-            window.__smoothPendingTicks = 0;
             window.__smoothPredX = undefined;
             window.__smoothPredY = undefined;
             window.__predictData = { x: pX, y: pY, time: performance.now() };
@@ -328,7 +327,7 @@
             for (const collection of collectionsToScan) {
                 if (!collection) continue;
                 safeForEach(collection, (ent) => {
-                    if (!ent || ent === player) return;
+                    if (!ent || ent === player || Number(entId) > 0) return;
 
                     const entType = ent.entityType ?? ent.type ?? ent.enemyType ?? ent.projectileType ?? ent.id ?? ent.typeId;
                     const entName = String(ent.name || ent.label || '').toLowerCase();
@@ -410,7 +409,7 @@
             } catch (e) { }
         }
 
-        // ================= CURRENT INPUT (from input hook, same space as cmd.x/y) =================
+        // ================= CURRENT INPUT =================
         let currentDirX = 0;
         let currentDirY = 0;
 
@@ -438,6 +437,23 @@
 
         // Smooth pending tick count (faster 0.65/0.35 for high ping stability)
         const rawPendingTicks = pending.length + 1;
+        let displayPendingTicks = rawPendingTicks;
+
+        // ============ ENEMY PREDICTION DELAY ============
+        // Remember the last measured delay ONLY while actively sending inputs
+        if (rawPendingTicks > 1 && hasMouseControl) {
+            window.__lastActivePendingTicks = rawPendingTicks;
+        }
+        // Enemies use the remembered delay when standing still so they don't snap backwards
+        let enemyPredTicks = rawPendingTicks;
+        if (rawPendingTicks <= 1 && !hasMouseControl && window.__lastActivePendingTicks) {
+            enemyPredTicks = window.__lastActivePendingTicks;
+        }
+        window.__enemySmoothPendingTicks = window.__enemySmoothPendingTicks || enemyPredTicks;
+        window.__enemySmoothPendingTicks += (enemyPredTicks - window.__enemySmoothPendingTicks) * 0.35;
+
+        // ============ PLAYER PREDICTION DELAY ============
+        // Player uses the raw logic so it doesn't snap
         if (window.__smoothPendingTicks == null) window.__smoothPendingTicks = rawPendingTicks;
         window.__smoothPendingTicks += (rawPendingTicks - window.__smoothPendingTicks) * 0.35;
 

@@ -190,7 +190,7 @@
     function updateEnemyPrediction(enemies) {
         const now = performance.now();
         const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
-        const hybridPredMs = (window.__smoothPendingTicks > 0 ? window.__smoothPendingTicks * SERVER_TICK_MS : basePredMs);
+        const hybridPredMs = (window.__enemySmoothPendingTicks > 0 ? window.__enemySmoothPendingTicks * SERVER_TICK_MS : basePredMs);
         const predMs = hybridPredMs + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
         for (const e of enemies) {
             if (!e._evadeLastPos) {
@@ -442,7 +442,7 @@
         }
 
         const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
-        const hybridPredMs = (window.__smoothPendingTicks > 0 ? window.__smoothPendingTicks * SERVER_TICK_MS : basePredMs);
+        const hybridPredMs = (window.__enemySmoothPendingTicks > 0 ? window.__enemySmoothPendingTicks * SERVER_TICK_MS : basePredMs);
         const predMs = hybridPredMs + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
         precomputeTrajectories(enemies, predMs, bounceZones);
 
