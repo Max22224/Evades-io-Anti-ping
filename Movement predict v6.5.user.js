@@ -258,15 +258,21 @@
 
         let zonesList = game.area.zones.list();
 
+        // Calculate the midpoint of the area to distinguish left from right
+        const areaX = game.area.x || 0;
+        const areaWidth = game.area.width || 9999;
+        const areaMidX = areaX + (areaWidth / 2);
+
         for (const zone of zonesList) {
             if (zone.type === 4) {
                 if (pX >= zone.x && pX <= zone.x + zone.width &&
                     pY >= zone.y && pY <= zone.y + zone.height) {
-                    return true;
+                    const isLeftSafe = zone.x < areaMidX;
+                    return { inSafe: true, isLeftSafe: isLeftSafe };
                 }
             }
         }
-        return false;
+        return { inSafe: false, isLeftSafe: false };
     }
 
     function getSmoothCameraPrediction(player, game) {
@@ -471,7 +477,9 @@
             // ================= POSITION-DEPENDENT AURA/SPEED CALC =================
             const tempPlayerPos = { ...player, x: x, y: y, pos: { x: x, y: y } };
             aura = getActiveAuras(player, game, x, y);
-            const inSafeZone = isPlayerInSafeZone(tempPlayerPos, game);
+            const safeZoneInfo = isPlayerInSafeZone(tempPlayerPos, game);
+            const inSafeZone = safeZoneInfo.inSafe;
+            const isLeftSafe = safeZoneInfo.isLeftSafe;
             tickZoneFriction = zoneFriction;
 
             if (inSafeZone) {
@@ -498,7 +506,7 @@
             }
 
             finalMovementSpeed = baseSpeed + additionalSpeed;
-            if (inSafeZone && finalMovementSpeed < 300) {
+            if (inSafeZone && game.area.number === 1 && isLeftSafe && finalMovementSpeed < 300) {
                 finalMovementSpeed = 300;
             }
             if (isStickyActive) finalMovementSpeed *= 0.8;
