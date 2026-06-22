@@ -125,6 +125,7 @@
         if (msg.pong) return; // Skip ping messages
         if (!isOverlayEnabled) return;
         if (msg.area) {
+            window._client.selfCmdHistory = []; // Clear command history on area change
             if (game?.gameState?.entities) {
                 for (const id of Object.keys(game.gameState.entities)) {
                     if (Number(id) < 0) {
@@ -744,13 +745,6 @@
             const liveGame = getGameRef();
 
             gloopOriginalRenders.clear();
-
-            if (liveGame?.gameState?.entities) {
-                for (const id of Object.keys(liveGame.gameState.entities)) {
-                    if (Number(id) < 0) delete liveGame.gameState.entities[id];
-                }
-            }
-
             currentArea = game.area;
             originalProps.clear();
             originalVisibility.clear();

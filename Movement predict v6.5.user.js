@@ -317,19 +317,13 @@
 
         try {
             const pRadius = player.radius || 15;
-            const collectionsToScan = [
-                game.entities,
-                game.gameState?.entities,
-                game.gameState?.projectiles,
-                game.gameState?.areaInfo?.projectiles
-            ];
 
-            for (const collection of collectionsToScan) {
+            for (const collection of game.gameState.entities) {
                 if (!collection) continue;
                 safeForEach(collection, (ent) => {
-                    if (!ent || ent === player || Number(entId) > 0) return;
+                    if (!ent || ent === player || Number(ent.id) > 0) return;
 
-                    const entType = ent.entityType ?? ent.type ?? ent.enemyType ?? ent.projectileType ?? ent.id ?? ent.typeId;
+                    const entType = ent.entityType;
                     const entName = String(ent.name || ent.label || '').toLowerCase();
 
                     const isPoisonGhost = (entType == 120) || entName.includes('poisonghost') || entName.includes('poison_ghost');
