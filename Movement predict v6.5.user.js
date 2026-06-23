@@ -276,6 +276,13 @@
     }
 
     function getSmoothCameraPrediction(player, game) {
+        const now = performance.now();
+        if (!window.__lastPlayerFrameTime) window.__lastPlayerFrameTime = now;
+        const dtMs = Math.min(now - window.__lastPlayerFrameTime, 50);
+        const dt = dtMs / 1000;
+        const ticksElapsed = dt * 60;
+        window.__lastPlayerFrameTime = now;
+
         const pX = (player.pos && player.pos.x !== undefined) ? player.pos.x : player.x;
         const pY = (player.pos && player.pos.y !== undefined) ? player.pos.y : player.y;
         const camera = game?.camera;
@@ -303,49 +310,42 @@
         // ================= HARD RESET =================
         if (isDead || isVoid) {
             window.__predVelState = { vx: 0, vy: 0 };
-            window.__smoothPredX = undefined;
-            window.__smoothPredY = undefined;
-            window.__predictData = { x: pX, y: pY, time: performance.now() };
+            window.__smoothPredX = pX;
+            window.__smoothPredY = pY;
+            window.__predictData = { x: pX, y: pY, time: now };
             if (isDebugVisible) {
                 updateDebugUI(0, 0, 0, 0, isVoid, false, player.voidTime || 0, player.isIced === true, isMagmaxAbilityActive, false, 0, 150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
             }
             return { x: pX, y: pY };
         }
 
-        if (poisonGhostTimer > 0) poisonGhostTimer--;
-        if (poisonSniperTimer > 0) poisonSniperTimer--;
+        if (poisonGhostTimer > 0) poisonGhostTimer -= ticksElapsed;
+        if (poisonSniperTimer > 0) poisonSniperTimer -= ticksElapsed;
+        const pRadius = player.radius || 15;
+        safeForEach(game.gameState.entities, (ent) => {
+            if (!ent || ent === player || Number(ent.id) > 0) return;
 
-        try {
-            const pRadius = player.radius || 15;
+            const entType = ent.entityType;
 
-            for (const collection of game.gameState.entities) {
-                if (!collection) continue;
-                safeForEach(collection, (ent) => {
-                    if (!ent || ent === player || Number(ent.id) > 0) return;
+            const isPoisonGhost = (entType == 120);
+            const isPoisonSniper = (entType == 121 || entType == 122);
 
-                    const entType = ent.entityType;
-                    const entName = String(ent.name || ent.label || '').toLowerCase();
+            if (isPoisonGhost || isPoisonSniper) {
+                const entX = (ent.pos && ent.pos.x !== undefined) ? ent.pos.x : ent.x;
+                const entY = (ent.pos && ent.pos.y !== undefined) ? ent.pos.y : ent.y;
 
-                    const isPoisonGhost = (entType == 120) || entName.includes('poisonghost') || entName.includes('poison_ghost');
-                    const isPoisonSniper = (entType == 121 || entType == 122) || entName.includes('poisonsniper') || entName.includes('poison_sniper');
+                if (entX === undefined || entY === undefined) return;
 
-                    if (isPoisonGhost || isPoisonSniper) {
-                        const entX = (ent.pos && ent.pos.x !== undefined) ? ent.pos.x : ent.x;
-                        const entY = (ent.pos && ent.pos.y !== undefined) ? ent.pos.y : ent.y;
+                const dist = Math.hypot(entX - pX, entY - pY);
+                const entRadius = ent.radius;
 
-                        if (entX === undefined || entY === undefined) return;
-
-                        const dist = Math.hypot(entX - pX, entY - pY);
-                        const entRadius = ent.radius ?? ent.size ?? ent.width ?? 15;
-
-                        if (dist < (pRadius + entRadius)) {
-                            if (isPoisonGhost) poisonGhostTimer = 15;
-                            if (isPoisonSniper) poisonSniperTimer = 60;
-                        }
-                    }
-                });
+                if (dist < (pRadius + entRadius)) {
+                    // FIX: Only trigger if timer is 0 so we don't infinitely reset it every frame!
+                    if (isPoisonGhost && poisonGhostTimer <= 0) poisonGhostTimer = 15;
+                    if (isPoisonSniper && poisonSniperTimer <= 0) poisonSniperTimer = 60;
+                }
             }
-        } catch (err) { }
+        });
 
         // ================= POSITION-INDEPENDENT SPEED SETUP =================
         let rawBaseSpeed = player.calculateSpeed ? player.calculateSpeed(0) : (player.speed || 0);
@@ -431,7 +431,6 @@
 
         // Smooth pending tick count (faster 0.65/0.35 for high ping stability)
         const rawPendingTicks = pending.length + 1;
-        let displayPendingTicks = rawPendingTicks;
 
         // ============ ENEMY PREDICTION DELAY ============
         // Remember the last measured delay ONLY while actively sending inputs
@@ -444,12 +443,12 @@
             enemyPredTicks = window.__lastActivePendingTicks;
         }
         window.__enemySmoothPendingTicks = window.__enemySmoothPendingTicks || enemyPredTicks;
-        window.__enemySmoothPendingTicks += (enemyPredTicks - window.__enemySmoothPendingTicks) * 0.35;
+        window.__enemySmoothPendingTicks += (enemyPredTicks - window.__enemySmoothPendingTicks) * (1 - Math.pow(0.65, ticksElapsed));
 
         // ============ PLAYER PREDICTION DELAY ============
         // Player uses the raw logic so it doesn't snap
         if (window.__smoothPendingTicks == null) window.__smoothPendingTicks = rawPendingTicks;
-        window.__smoothPendingTicks += (rawPendingTicks - window.__smoothPendingTicks) * 0.35;
+        window.__smoothPendingTicks += (rawPendingTicks - window.__smoothPendingTicks) * (1 - Math.pow(0.65, ticksElapsed));
 
         const integerTicks = Math.floor(window.__smoothPendingTicks);
         const fractionalPart = window.__smoothPendingTicks - integerTicks;
@@ -508,17 +507,13 @@
                 baseSpeed = 0;
             } else {
                 let slowReduction = 0;
-                if (player.mutatiorbBuffEffectsReduction === true) {
-                    slowReduction = (player.heroType == 10) ? 0.60 : 0.40;
-                }
+                if (player.mutatiorbBuffEffectsReduction === true) slowReduction = (player.heroType == 10) ? 0.60 : 0.40;
                 effectiveSlow = aura.slow * (1 - slowReduction);
                 baseSpeed *= (1 - Math.min(1, Math.max(0, effectiveSlow)));
             }
 
             finalMovementSpeed = baseSpeed + additionalSpeed;
-            if (inSafeZone && game.area.number === 1 && isLeftSafe && finalMovementSpeed < 300) {
-                finalMovementSpeed = 300;
-            }
+            if (inSafeZone && game.area.number === 1 && isLeftSafe && finalMovementSpeed < 300) finalMovementSpeed = 300;
             if (isStickyActive) finalMovementSpeed *= 0.8;
 
             let currentIceSpeed = baseIceSpeed;
@@ -642,31 +637,29 @@
         }
 
         // ================= TELEPORT / MAP CHANGE SNAP =================
-        // If the player position suddenly jumps (teleporter, map change, respawn),
-        // force the smoothing variables to snap instantly to prevent the camera from flying through the void.
-        if (window.__smoothPredX !== undefined) {
-            const jumpDist = Math.hypot(pX - window.__smoothPredX, pY - window.__smoothPredY);
-            if (jumpDist > 150) { // Threshold for a teleport/server snap
-                window.__smoothPredX = pX;
-                window.__smoothPredY = pY;
-                window.__predVelState = { vx: 0, vy: 0 };
-                x = pX;
-                y = pY;
-            }
-        }
-
-        // ================= OUTPUT SMOOTHING =================
+        // Initialize smooth prediction on first frame
         if (window.__smoothPredX === undefined) {
             window.__smoothPredX = x;
             window.__smoothPredY = y;
         }
-        window.__smoothPredX += (x - window.__smoothPredX) * 0.7;
-        window.__smoothPredY += (y - window.__smoothPredY) * 0.7;
 
-        const finalX = window.__smoothPredX;
-        const finalY = window.__smoothPredY;
+        // If the player position suddenly jumps (teleporter, map change, respawn),
+        // force the smoothing variables to snap instantly to prevent the camera from flying through the void.
+        const jumpDist = Math.hypot(pX - window.__smoothPredX, pY - window.__smoothPredY);
+        if (jumpDist > 150) {
+            // Snap immediately
+            window.__smoothPredX = x;
+            window.__smoothPredY = y;
+            window.__predVelState = { vx: 0, vy: 0 }; // MUST reset velocity on teleport!
+        } else {
+            // ================= OUTPUT SMOOTHING =================
+            // Smoothly apply the ideal position using deltaTime (frame-rate independent)
+            const lerpFactor = 1 - Math.pow(0.5, dtMs / 16.66);
+            window.__smoothPredX += (x - window.__smoothPredX) * lerpFactor;
+            window.__smoothPredY += (y - window.__smoothPredY) * lerpFactor;
+        }
 
-        window.__predictData = { x: finalX, y: finalY, time: performance.now() };
+        window.__predictData = { x: window.__smoothPredX, y: window.__smoothPredY, time: now };
 
         // ================= DEBUG OVERLAY =================
         if (isDebugVisible) {
@@ -687,7 +680,7 @@
                 baseSpeed, additionalSpeed, finalMovementSpeed, effectiveSlow,
                 false, (tickZoneFriction === 0), 0,
                 player.isIced === true, isMagmaxAbilityActive, isNightActive,
-                maxPoisonTicks, 150, cursorSpeed, currentDist,
+                maxPoisonTicks, 150, cursorSpeed, Math.hypot(currentDirX, currentDirY),
                 aura.pullX, aura.pullY, window.__smoothPendingTicks,
                 finalStepVx * 60, finalStepVy * 60,
                 finalStepVx * 60, finalStepVy * 60,
@@ -695,7 +688,7 @@
             );
         }
 
-        return { x: finalX, y: finalY };
+        return { x: window.__smoothPredX, y: window.__smoothPredY };
     }
 
     function updateDebugUI(base, add, final, slow, voidState, slipperyState, voidTicks, isIced, magmaxActive, nightActive, poisonTicks, maxMouseDist, cursorSpeed, currentDist, pullX, pullY, dynamicTicks, avgVx, avgVy, predVx, predVy, moveAngle, targetAngle) {

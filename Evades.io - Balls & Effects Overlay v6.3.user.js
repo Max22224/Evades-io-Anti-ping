@@ -18,10 +18,10 @@
 
     // ==================== EXTRAPOLATION SETTINGS ====================
     const SERVER_TICK_MS = 1000 / 60;
-    const CLONE_OFFSET = 10000000; // Fixed: Offset to handle entity id === 0 correctly
+    const CLONE_OFFSET = 10000000; // Offset to handle entity id === 0 correctly
 
     // ==================== BALL TYPE CONFIGURATION ====================
-    const _ignoredTypes = new Set([62, 72, 199, 8]);
+    const _ignoredTypes = new Set([62, 72, 199, 8, 113, 228, 136]);
 
     // ==================== Main Input / Output Hook ====================
     window._client = window._client || {};
@@ -31,6 +31,7 @@
         selfAcked: null,
         ping: 0,
         pingHistory: [],
+        unlockFPS: false
     });
 
     let _obs = new MutationObserver((ev) => {
@@ -48,9 +49,10 @@
             .replace(/processServerMessage\(([^)]+)\)\{/, (m, msgVar) => `processServerMessage(${msgVar}){
         try {
             window._client && window._client.onMessage && window._client.onMessage(${msgVar});
-        } catch(e){}`)
+        } catch(e){ }`)
 
-            .replace(/ag\.emit\(([^)]+)\)/, (m, msgVar) => `(window._client && window._client.input && window._client.input(${msgVar}), ag.emit(${msgVar}))`);
+            .replace(/ag\.emit\(([^)]+)\)/, (m, msgVar) => `(window._client && window._client.input && window._client.input(${msgVar}), ag.emit(${msgVar}))`)
+            .replace("this.gameState.packetNumber===this.lastRenderedPacket", a => "this.gameState.packetNumber===this.lastRenderedPacket && !window._client.unlockFPS")
 
         let nScr = document.createElement("script");
         nScr.setAttribute("type", "module");
@@ -143,7 +145,6 @@
     let isHideOriginalEnabled = true;
     let isHideSelfEnabled = false;
     let isPredictPlayerEnabled = true;
-    let isExtraTickDelayEnabled = false;
     let isUIVisible = true;
 
     let currentArea = null;
@@ -192,7 +193,7 @@
         const now = performance.now();
         const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
         const hybridPredMs = (window.__enemySmoothPendingTicks > 0 ? window.__enemySmoothPendingTicks * SERVER_TICK_MS : basePredMs);
-        const predMs = hybridPredMs + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
+        const predMs = hybridPredMs;
         for (const e of enemies) {
             if (!e._evadeLastPos) {
                 e._evadeLastPos = { x: e.x, y: e.y };
@@ -422,74 +423,76 @@
 
         if (!msg.entities) msg.entities = [];
 
+        window.__enemyPredState = window.__enemyPredState || {};
         const enemies = [];
-        for (const [id, ent] of Object.entries(gameState.entities)) {
-            if (Number(id) < 0) continue;
-            if (!ent.isEnemy) continue;
-            if (ent.nick !== undefined || ent.entityType === 118 || ent.entityType === 113 || ent.entityType === 130 || _ignoredTypes.has(ent.entityType)) continue;
-            if ((ent.name || '').toLowerCase().includes('switch')) continue;
-            if (ent.entityType === 136) continue;
-            if (typeof ent.x !== 'number' || typeof ent.y !== 'number' || !ent.radius) continue;
-
-            enemies.push(ent);
-        }
-        updateEnemyPrediction(enemies);
-
-        let bounceZones = [];
-        if (game.area && game.area.zones) {
-            let rawZones = game.area.zones.list()
-            // Zone type 0 is where enemies are active and bounce
-            bounceZones = rawZones.filter(z => z.type === 0);
-        }
-
-        const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
-        const hybridPredMs = (window.__enemySmoothPendingTicks > 0 ? window.__enemySmoothPendingTicks * SERVER_TICK_MS : basePredMs);
-        const predMs = hybridPredMs + (isExtraTickDelayEnabled ? SERVER_TICK_MS : 0);
-        precomputeTrajectories(enemies, predMs, bounceZones);
-
         for (const [id, ent] of Object.entries(gameState.entities)) {
             const numericId = Number(id);
             if (isNaN(numericId) || numericId < 0) continue;
+            if (!ent.isEnemy || ent.isPlayer || ent.entityType === 130 || _ignoredTypes.has(ent.entityType)) continue;
+            if ((ent.name || '').toLowerCase().includes('switch')) continue;
+            if (typeof ent.x !== 'number' || typeof ent.y !== 'number' || !ent.radius) continue;
 
-            const hasVelocity = Math.abs(ent._vxMs) > 0.0001 || Math.abs(ent._vyMs) > 0.0001;
+            enemies.push({ numericId, ent });
+        }
 
-            if (hasVelocity) {
-                let predX, predY;
+        updateEnemyPrediction(enemies.map(e => e.ent));
 
-                if (ent._trajValid && ent._trajectory) {
-                    const trajPos = interpolateTrajectory(ent._trajectory, predMs);
-                    if (trajPos) {
-                        predX = trajPos.x;
-                        predY = trajPos.y;
-                    } else {
-                        predX = ent._predX;
-                        predY = ent._predY;
-                    }
-                } else {
-                    predX = ent._predX;
-                    predY = ent._predY;
+        let bounceZones = [];
+        if (game.area && game.area.zones) {
+            bounceZones = game.area.zones.list().filter(z => z.type === 0);
+        }
+
+        const predMs = window.__enemySmoothPendingTicks > 0 ? window.__enemySmoothPendingTicks * SERVER_TICK_MS : (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
+
+        precomputeTrajectories(enemies.map(e => e.ent), predMs + 50, bounceZones);
+
+        // Clean up stale enemies from our sandbox state using the filtered array
+        const activeCloneIds = new Set(enemies.map(e => String(-e.numericId - CLONE_OFFSET)));
+        for (const id of Object.keys(window.__enemyPredState)) {
+            if (!activeCloneIds.has(id)) delete window.__enemyPredState[id];
+        }
+
+        // Inject clones for the filtered enemies
+        for (const { numericId, ent } of enemies) {
+            const id = String(numericId);
+            const cloneId = String(-numericId - CLONE_OFFSET);
+            const state = window.__enemyPredState[cloneId];
+
+            // Update state on server message
+            window.__enemyPredState[cloneId] = {
+                serverBaseTime: performance.now(),
+                serverBaseX: ent.x,
+                serverBaseY: ent.y,
+                vxMs: ent._vxMs || 0,
+                vyMs: ent._vyMs || 0,
+                predMs: predMs,
+                trajectory: ent._trajectory,
+                trajValid: ent._trajValid,
+                smoothX: state ? state.smoothX : ent._predX,
+                smoothY: state ? state.smoothY : ent._predY,
+                radius: ent.radius // Save radius so clone never disappears if original gets 0 radius
+            };
+
+            const clone = Object.assign({}, ent, {
+                id: -numericId - CLONE_OFFSET,
+                x: window.__enemyPredState[cloneId].smoothX,
+                y: window.__enemyPredState[cloneId].smoothY,
+                radius: ent.radius, // Force real radius so clone isn't invisible
+                isDestroyed: false,
+            });
+
+            const storedProps = originalProps.get(id);
+            if (storedProps && storedProps.effectsData) {
+                clone.effects = ent.effects ? JSON.parse(JSON.stringify(ent.effects)) : {};
+                clone.effects.effects = JSON.parse(JSON.stringify(storedProps.effectsData));
+            } else if (ent.effects) {
+                try {
+                    clone.effects = JSON.parse(JSON.stringify(ent.effects));
+                } catch (e) {
+                    clone.effects = ent.effects;
                 }
-
-                const clone = Object.assign({}, ent, {
-                    id: -numericId - CLONE_OFFSET, // Using CLONE_OFFSET to ensure id is strictly negative, even when numericId === 0
-                    x: predX,
-                    y: predY,
-                    isDestroyed: false,
-                });
-
-                const storedProps = originalProps.get(id);
-                if (storedProps && storedProps.effectsData) {
-                    clone.effects = ent.effects ? JSON.parse(JSON.stringify(ent.effects)) : {};
-                    clone.effects.effects = JSON.parse(JSON.stringify(storedProps.effectsData));
-                } else if (ent.effects) {
-                    try {
-                        clone.effects = JSON.parse(JSON.stringify(ent.effects));
-                    } catch (e) {
-                        clone.effects = ent.effects;
-                    }
-                }
-                msg.entities.push(clone);
             }
+            msg.entities.push(clone);
         }
     };
 
@@ -762,6 +765,12 @@
                 }
 
                 cacheIncomingAuras(liveGame);
+
+                const now = performance.now();
+                if (!window.__lastEnemyFrameTime) window.__lastEnemyFrameTime = now;
+                const dtMs = Math.min(now - window.__lastEnemyFrameTime, 50);
+                window.__lastEnemyFrameTime = now;
+
                 if (liveGame?.gameState?.entities) {
                     for (const id of Object.keys(liveGame.gameState.entities)) {
                         const numId = Number(id);
@@ -772,19 +781,58 @@
 
                             if (!originalEnt) {
                                 delete liveGame.gameState.entities[id];
+                                if (window.__enemyPredState) delete window.__enemyPredState[id];
                                 continue;
                             }
 
-                            const hasVelocity = Math.abs(originalEnt._vxMs) > 0.0001 || Math.abs(originalEnt._vyMs) > 0.0001;
+                            const state = window.__enemyPredState ? window.__enemyPredState[id] : null;
+                            if (state) {
+                                const hasVelocity = Math.abs(state.vxMs) > 0.0001 || Math.abs(state.vyMs) > 0.0001;
 
-                            if (hasVelocity) {
-                                cloneEnt.isDestroyed = false;
-                                cloneEnt.currentTransparency = 1;
-                                if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
-                            } else {
-                                cloneEnt.isDestroyed = false;
-                                cloneEnt.currentTransparency = 0;
-                                cloneEnt.radius = originalEnt.radius;
+                                if (hasVelocity) {
+                                    cloneEnt.isDestroyed = false;
+                                    if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
+
+                                    // 1. Time elapsed since the last server update for this enemy
+                                    const T = now - state.serverBaseTime;
+
+                                    // 2. The exact point in time we want to render on the trajectory
+                                    const renderTimeMs = T + state.predMs;
+
+                                    let idealX, idealY;
+
+                                    // 3. Get the position from the trajectory
+                                    if (state.trajValid && state.trajectory && state.trajectory.length > 0) {
+                                        const trajPos = interpolateTrajectory(state.trajectory, renderTimeMs);
+                                        if (trajPos) {
+                                            idealX = trajPos.x;
+                                            idealY = trajPos.y;
+                                        }
+                                    }
+
+                                    // Fallback to straight line if trajectory failed
+                                    if (idealX === undefined) {
+                                        idealX = state.serverBaseX + state.vxMs * renderTimeMs;
+                                        idealY = state.serverBaseY + state.vyMs * renderTimeMs;
+                                    }
+
+                                    // 4. Smoothly blend towards the ideal position to hide micro-jumps from server corrections
+                                    const lerpFactor = 1 - Math.pow(0.2, dtMs / 16.66);
+                                    state.smoothX += (idealX - state.smoothX) * lerpFactor;
+                                    state.smoothY += (idealY - state.smoothY) * lerpFactor;
+
+                                    // 5. Apply to the game engine's entity for rendering
+                                    cloneEnt.x = state.smoothX;
+                                    cloneEnt.y = state.smoothY;
+                                } else {
+                                    // If an enemy has stopped (e.g. frozen by ability) render it at its server position
+                                    cloneEnt.isDestroyed = false;
+                                    if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
+                                    cloneEnt.x = state.serverBaseX;
+                                    cloneEnt.y = state.serverBaseY;
+                                    state.smoothX = state.serverBaseX;
+                                    state.smoothY = state.serverBaseY;
+                                }
                             }
                         }
                     }
@@ -810,7 +858,7 @@
     function createBtn(bottom, text, color, onClick) {
         const btn = document.createElement('div');
         btn.style.cssText = `position: fixed; bottom: ${bottom}px; left: 10px; background: rgba(0,0,0,0.85); color: ${color}; font-family: monospace; font-size: 11px; padding: 6px 10px; border-radius: 6px; z-index: 1000000; cursor: pointer; border: 1px solid ${color}; user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;`;
-        btn.innerHTML = text;
+        btn.innerText = text;
         btn.onclick = onClick;
         btn.addEventListener('mousedown', (e) => e.preventDefault());
         document.body.appendChild(btn);
@@ -838,39 +886,39 @@
             originalProps.clear();
         }
 
-        overlayBtn.innerHTML = `🎨 OVERLAY [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
+        overlayBtn.innerText = `🎨 OVERLAY [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
         overlayBtn.style.borderColor = isOverlayEnabled ? '#0f0' : '#f00';
 
-        hideBtn.innerHTML = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
+        hideBtn.innerText = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
         hideBtn.style.borderColor = isHideOriginalEnabled ? '#f0f' : '#0ff';
-        selfBtn.innerHTML = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
+        selfBtn.innerText = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
         selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
-        predictPlayerBtn.innerHTML = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
+        predictPlayerBtn.innerText = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
     const hideBtn = createBtn(110, '👻 HIDE ORIGINALS [ON]', '#f0f', () => {
         isHideOriginalEnabled = !isHideOriginalEnabled;
-        hideBtn.innerHTML = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
+        hideBtn.innerText = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
         hideBtn.style.borderColor = isHideOriginalEnabled ? '#f0f' : '#0ff';
     });
 
     const selfBtn = createBtn(160, '👤 HIDE SELF [OFF]', '#ffa', () => {
         isHideSelfEnabled = !isHideSelfEnabled;
-        selfBtn.innerHTML = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
+        selfBtn.innerText = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
         selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
     });
 
     const predictPlayerBtn = createBtn(210, '🚀 PREDICT PLAYER [ON]', '#0f0', () => {
         isPredictPlayerEnabled = !isPredictPlayerEnabled;
-        predictPlayerBtn.innerHTML = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
+        predictPlayerBtn.innerText = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
-    const extraTickBtn = createBtn(260, '⏱️ +1 TICK EXTRAPOLATION [OFF]', '#ffa500', () => {
-        isExtraTickDelayEnabled = !isExtraTickDelayEnabled;
-        extraTickBtn.innerHTML = `⏱️ +1 TICK EXTRAPOLATION [${isExtraTickDelayEnabled ? 'ON' : 'OFF'}]`;
-        extraTickBtn.style.borderColor = isExtraTickDelayEnabled ? '#0f0' : '#ffa500';
+    const extraTickBtn = createBtn(260, '🔒 Unlock FPS [OFF]', '#ffa500', () => {
+        window._client.unlockFPS = !window._client.unlockFPS;
+        extraTickBtn.innerText = window._client.unlockFPS ? '🔓 Unlock FPS [ON]' : '🔒 Unlock FPS [OFF]';
+        extraTickBtn.style.borderColor = window._client.unlockFPS ? '#0f0' : '#ffa500';
     });
     // Entity cache cleanup
     setInterval(() => {
