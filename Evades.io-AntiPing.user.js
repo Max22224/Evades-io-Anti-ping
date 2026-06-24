@@ -1,11 +1,13 @@
 // ==UserScript==
-// @name         Evades.io - Balls & Effects Overlay v6.3.1
+// @name         Evades.io - Anti Ping Main
 // @namespace    https://evades.io/
-// @version      6.3.1
-// @description  Visuals for displaying balls and effects in Evades.io
+// @version      7.0.0
+// @description  Anti ping for Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
 // @run-at       document-end
+// @downloadURL https://raw.githubusercontent.com/Max22224/Evades-io-Anti-ping/main/Evades.io-AntiPing.user.js
+// @updateURL   https://raw.githubusercontent.com/Max22224/Evades-io-Anti-ping/main/Evades.io-AntiPing.user.js
 // @grant        none
 // ==/UserScript==
 

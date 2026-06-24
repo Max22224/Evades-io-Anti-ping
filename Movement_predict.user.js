@@ -1,11 +1,13 @@
 // ==UserScript==
-// @name         Movement predict v6.5
+// @name         Movement predict
 // @namespace    https://evades.io/
-// @version      6.5
-// @description  Restored exact sandbox physics (independent axis clipping)
+// @version      7.0.0
+// @description  Prediction of player movement.
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
 // @run-at       document-end
+// @downloadURL https://raw.githubusercontent.com/Max22224/Evades-io-Anti-ping/main/Movement_predict.user.js
+// @updateURL   https://raw.githubusercontent.com/Max22224/Evades-io-Anti-ping/main/Movement_predict.user.js
 // @grant        none
 // ==/UserScript==
 
