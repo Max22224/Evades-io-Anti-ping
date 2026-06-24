@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades.io - Anti Ping Main
 // @namespace    https://evades.io/
-// @version      7.0.0
+// @version      7.0.1
 // @description  Anti ping for Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -165,6 +165,154 @@
 
     const ENEMY_TYPE_WALL = 229;
 
+    // ==================== EXTENSIBLE BALL BEHAVIOR PREDICTORS ====================
+    /**
+     * Custom prediction behavior for Icicle (Type 71).
+     * Handles variable frame rates (unlock_fps) safely via dynamic deltaTime.
+     * @param {Object} ent - The entity object being predicted
+     * @param {number} deltaTime - Time step in milliseconds
+     */
+    function predictIcicleBehavior(ent, deltaTime) {
+        if (ent.clock === undefined) ent.clock = 0;
+        if (ent.wallHit === undefined) ent.wallHit = false;
+
+        if (ent.wallHit) {
+            ent.clock += deltaTime;
+            if (ent.clock > 1000) {
+                ent.wallHit = false;
+                ent.clock = 0;
+                ent.speedMultiplier = 1; // Restore movement speed
+            } else {
+                ent.speedMultiplier = 0; // Freeze the ball on wall collision
+            }
+        } else {
+            if (ent.speedMultiplier === undefined || ent.speedMultiplier === 0) {
+                ent.speedMultiplier = 1;
+            }
+        }
+    }
+
+    // Registry mapping entityTypes to their specific client-side routines
+    const ENTITY_PREDICTORS = {
+        71: predictIcicleBehavior,
+        // Future expansion: 72: predictAnotherBallBehavior,
+    };
+
+    /**
+     * Core dispatcher for frame-by-frame entity behavior ticking.
+     * @param {Object} ent - The entity clone being processed
+     * @param {number} deltaTime - The calculated frame step time slice
+     */
+    function predictEntityBehavior(ent, deltaTime) {
+        if (!ent) return;
+        const entType = ent.entityType ?? ent.type ?? 0;
+        const handler = ENTITY_PREDICTORS[entType];
+        if (handler) {
+            handler(ent, deltaTime);
+        } else {
+            if (ent.speedMultiplier === undefined) {
+                ent.speedMultiplier = 1;
+            }
+        }
+    }
+
+    /**
+     * Custom long-term trajectory simulation for Icicles.
+     * Projects freeze states during multi-tick path precomputations.
+     */
+function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
+        const ping = window._client.ping || 0;
+        const limitMs = 1032 - (ping * 0.5); // Динамический лимит, уменьшенный на пинг
+        const stepMs = config.bounceSimStepMs || 12;
+
+        let x = e.x;
+        let y = e.y;
+        let simClock = e._clock || 0;
+        let simWallHit = e._wallHit || false;
+
+        // Извлекаем базовые направления скоростей из сохраненных свойств
+        let baseVx = e._vxMs || 0;
+        let baseVy = e._vyMs || 0;
+        if (Math.hypot(baseVx, baseVy) < 1e-6) {
+            baseVx = e._lastVxMs || 0;
+            baseVy = e._lastVyMs || 0;
+        }
+
+        // Если время у стены превысило лимит, разворачиваем шар в обратную сторону
+        if (simWallHit && (simClock - limitMs) > (ping * 0.5)) {
+            simWallHit = false;
+            baseVx = -baseVx;
+            baseVy = -baseVy;
+        }
+
+        let vx = simWallHit ? 0 : baseVx;
+        let vy = simWallHit ? 0 : baseVy;
+
+        // Находим текущую игровую зону для определения точных границ стен
+        let zone = null;
+        if (bounceZones && bounceZones.length > 0) {
+            const zonePadding = 32; // Безопасный отступ для поиска зоны
+            for (const z of bounceZones) {
+                if (x >= z.x - zonePadding && x <= z.x + z.width + zonePadding &&
+                    y >= z.y - zonePadding && y <= z.y + z.height + zonePadding) {
+                    zone = z;
+                    break;
+                }
+            }
+        }
+
+        const points = [{ t: 0, x, y }];
+
+        for (let t = stepMs; t <= maxTimeMs; t += stepMs) {
+            if (simWallHit) {
+                simClock += stepMs;
+                if (simClock >= limitMs) {
+                    simWallHit = false;
+                    // Разворачиваем вектор движения после окончания таймера заморозки
+                    baseVx = -baseVx;
+                    baseVy = -baseVy;
+                    vx = baseVx;
+                    vy = baseVy;
+
+                    // Экстраполируем остаток времени шага после выхода из стазиса
+                    const overTime = simClock - limitMs;
+                    x += vx * overTime;
+                    y += vy * overTime;
+                }
+                // КРИТИЧЕСКОЕ УСЛОВИЕ: пока simWallHit === true, координаты x и y НЕ меняются.
+                // Шар гарантированно стоит на месте касания до окончания таймера.
+            } else {
+                // Обычное движение вперед
+                x += vx * stepMs;
+                y += vy * stepMs;
+
+                // Проверяем касание стены прямо в цикле симуляции (если зона найдена)
+                if (zone) {
+                    const eR = e.radius || 15;
+                    const bLeft = zone.x + eR;
+                    const bRight = zone.x + zone.width - eR;
+                    const bTop = zone.y + eR;
+                    const bBottom = zone.y + zone.height - eR;
+
+                    if (x <= bLeft || x >= bRight || y <= bTop || y >= bBottom) {
+                        // Жестко фиксируем координаты клона в точке столкновения со стеной
+                        x = Math.max(bLeft, Math.min(bRight, x));
+                        y = Math.max(bTop, Math.min(bBottom, y));
+
+                        // Включаем режим удержания у стены и останавливаем симуляцию движения
+                        simWallHit = true;
+                        simClock = 0;
+                        vx = 0;
+                        vy = 0;
+                    }
+                }
+            }
+            points.push({ t, x, y });
+        }
+        return points;
+    }
+
+    // ==================== ENGINE UTILITIES ====================
     function getGameRef() {
         try {
             const el = document.querySelector('div.quests-launcher');
@@ -196,25 +344,39 @@
         const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
         const hybridPredMs = (window.__enemySmoothPendingTicks > 0 ? window.__enemySmoothPendingTicks * SERVER_TICK_MS : basePredMs);
         const predMs = hybridPredMs;
+
         for (const e of enemies) {
             if (!e._evadeLastPos) {
                 e._evadeLastPos = { x: e.x, y: e.y };
                 e._evadeLastTime = now;
                 e._vxMs = 0;
                 e._vyMs = 0;
+                e._maxSpeedMs = 0; // Initialize storage for max speed
                 e._speedMs = 0;
                 e._fx = e.x;
                 e._fy = e.y;
                 e._predX = e.x;
                 e._predY = e.y;
+                if (e.entityType === 71) {
+                    e._clock = 0;
+                    e._wallHit = false;
+                    e._lastVxMs = 0;
+                    e._lastVyMs = 0;
+                }
                 continue;
             }
 
             const moved = (e.x !== e._evadeLastPos.x || e.y !== e._evadeLastPos.y);
             if (moved) {
                 const wallClockDt = now - e._evadeLastTime;
-                const numTicks = Math.max(1, Math.round(wallClockDt / SERVER_TICK_MS));
+
+                // Determine if the ball moved for the first time after stopping at a wall or a long idle period
+                const isReboundingFromStop = (wallClockDt > SERVER_TICK_MS * 1.5) || (e._vxMs === 0 && e._vyMs === 0);
+
+                // If the ball just left stasis, calculate the step as if it took 1 tick instead of the entire idle duration
+                const numTicks = isReboundingFromStop ? 1 : Math.max(1, Math.round(wallClockDt / SERVER_TICK_MS));
                 const effectiveDt = numTicks * SERVER_TICK_MS;
+
                 if (effectiveDt > 0.5) {
                     const rawVxMs = (e.x - e._evadeLastPos.x) / effectiveDt;
                     const rawVyMs = (e.y - e._evadeLastPos.y) / effectiveDt;
@@ -226,6 +388,11 @@
                         e._trajectory = null;
                         e._trajValid = false;
                     } else {
+                        // Store the ball's maximum speed during normal movement
+                        if (rawSpeed > 0.001) {
+                            e._maxSpeedMs = Math.max(e._maxSpeedMs || 0, rawSpeed);
+                        }
+
                         const emaSpeed = Math.hypot(e._vxMs, e._vyMs);
                         let isBounce = false;
 
@@ -235,11 +402,29 @@
                             isBounce = angleDiff > config.bounceDetectAngle;
                         }
 
-                        if (isBounce) {
+                        if (isReboundingFromStop) {
+                            // When exiting a stop, instantly apply full speed in the movement direction, bypassing EMA lag
+                            if (e._maxSpeedMs > 0) {
+                                const h = Math.hypot(e.x - e._evadeLastPos.x, e.y - e._evadeLastPos.y);
+                                if (h > 0.001) {
+                                    e._vxMs = ((e.x - e._evadeLastPos.x) / h) * e._maxSpeedMs;
+                                    e._vyMs = ((e.y - e._evadeLastPos.y) / h) * e._maxSpeedMs;
+                                } else {
+                                    e._vxMs = rawVxMs;
+                                    e._vyMs = rawVyMs;
+                                }
+                            } else {
+                                // If max speed is unknown (newly spawned ball), take raw speed without EMA
+                                e._vxMs = rawVxMs;
+                                e._vyMs = rawVyMs;
+                            }
+                            e._trajectory = null;
+                        } else if (isBounce) {
                             e._vxMs = rawVxMs;
                             e._vyMs = rawVyMs;
                             e._trajectory = null;
                         } else {
+                            // Standard EMA smoothing for continuous movement
                             e._vxMs = e._vxMs * (1 - config.enemyEmaAlpha) + rawVxMs * config.enemyEmaAlpha;
                             e._vyMs = e._vyMs * (1 - config.enemyEmaAlpha) + rawVyMs * config.enemyEmaAlpha;
                         }
@@ -261,6 +446,30 @@
 
             e._predX = e._fx + e._vxMs * predMs;
             e._predY = e._fy + e._vyMs * predMs;
+
+            // Tracking and state sync logic for Icicles (Type 71)
+            if (e.entityType === 71) {
+                if (e._clock === undefined) e._clock = 0;
+                if (e._wallHit === undefined) e._wallHit = false;
+
+                if (moved) {
+                    e._wallHit = false;
+                    e._clock = 0;
+                    if (Math.hypot(e._vxMs, e._vyMs) > 1e-4) {
+                        e._lastVxMs = e._vxMs;
+                        e._lastVyMs = e._vyMs;
+                    }
+                } else {
+                    if (!e._wallHit) {
+                        if (Math.hypot(e._vxMs, e._vyMs) > 1e-4) {
+                            e._lastVxMs = e._vxMs;
+                            e._lastVyMs = e._vyMs;
+                        }
+                        e._wallHit = true;
+                        e._clock = 0;
+                    }
+                }
+            }
         }
     }
 
@@ -333,6 +542,7 @@
 
     function simulateEnemyTrajectory(e, maxTimeMs, bounceZones) {
         if (e.entityType === ENEMY_TYPE_WALL) return simulateWallHuggingTrajectory(e, maxTimeMs, bounceZones);
+        if (e.entityType === 71) return simulateIcicleTrajectory(e, maxTimeMs, bounceZones);
 
         const eR = e.radius;
         let x = e.x, y = e.y, vx = e._vxMs || 0, vy = e._vyMs || 0;
@@ -789,7 +999,16 @@
 
                             const state = window.__enemyPredState ? window.__enemyPredState[id] : null;
                             if (state) {
-                                const hasVelocity = Math.abs(state.vxMs) > 0.0001 || Math.abs(state.vyMs) > 0.0001;
+                                // Apply type-specific client side prediction behaviors (e.g. Icicle wall hit clock)
+                                predictEntityBehavior(cloneEnt, dtMs);
+
+                                const currentMultiplier = cloneEnt.speedMultiplier !== undefined ? cloneEnt.speedMultiplier : 1;
+                                let hasVelocity = (Math.abs(state.vxMs) > 0.0001 || Math.abs(state.vyMs) > 0.0001) && currentMultiplier > 0;
+
+                                // Force position trajectory interpolation for type 71 to simulate unfreezing correctly
+                                if (cloneEnt.entityType === 71) {
+                                    hasVelocity = true;
+                                }
 
                                 if (hasVelocity) {
                                     cloneEnt.isDestroyed = false;
@@ -834,6 +1053,15 @@
                                     cloneEnt.y = state.serverBaseY;
                                     state.smoothX = state.serverBaseX;
                                     state.smoothY = state.serverBaseY;
+                                }
+                            }
+                        } else {
+                            // Continuously track clock increments using local precise frame time deltas for real icicle entities
+                            const originalEnt = liveGame.gameState.entities[id];
+                            if (originalEnt && originalEnt.entityType === 71) {
+                                if (originalEnt._wallHit) {
+                                    if (originalEnt._clock === undefined) originalEnt._clock = 0;
+                                    originalEnt._clock += dtMs;
                                 }
                             }
                         }
