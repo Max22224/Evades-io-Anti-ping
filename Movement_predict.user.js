@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movement predict
 // @namespace    https://evades.io/
-// @version      7.0.0
+// @version      7.0.1
 // @description  Prediction of player movement.
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -175,8 +175,8 @@
             const entType = ent.entityType ?? ent.type ?? '';
             let isGravity = (entType == 63);
             let isRepelling = (entType == 142);
-            let gravityForce = (ent.gravity !== undefined) ? ent.gravity : (6 / 32);
-            let repulsionForce = (ent.repulsion !== undefined) ? ent.repulsion : (6 / 32);
+            let gravityForce = (ent.gravity !== undefined) ? ent.gravity : (3);
+            let repulsionForce = (ent.repulsion !== undefined) ? ent.repulsion : (3);
             let currentAuraSize = 0;
 
             const effs = (window.__originalEffects && window.__originalEffects.has(entId))
@@ -214,7 +214,7 @@
                     const isInvuln = typeof player.isInvulnerable === 'function' ? player.isInvulnerable() : (player.isInvulnerable || player.invulnerable);
                     if (!isInvuln) {
                         const effectImmune = (player.effectImmune !== undefined) ? player.effectImmune : 1;
-                        const amplitude = Math.pow(2, -(dist / (100 / 32)));
+                        const amplitude = Math.pow(2, -(dist / (100)));
                         const dx = pX - predictedEntX;
                         const dy = pY - predictedEntY;
                         const angleToPlayer = Math.atan2(dy, dx);
