@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades.io - Anti Ping Main
 // @namespace    https://evades.io/
-// @version      7.0.1
+// @version      7.0.2
 // @description  Anti ping for Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -181,9 +181,9 @@
             if (ent.clock > 1000) {
                 ent.wallHit = false;
                 ent.clock = 0;
-                ent.speedMultiplier = 1; // Restore movement speed
+                ent.speedMultiplier = 1;
             } else {
-                ent.speedMultiplier = 0; // Freeze the ball on wall collision
+                ent.speedMultiplier = 0;
             }
         } else {
             if (ent.speedMultiplier === undefined || ent.speedMultiplier === 0) {
@@ -191,13 +191,10 @@
             }
         }
     }
-
     // Registry mapping entityTypes to their specific client-side routines
     const ENTITY_PREDICTORS = {
         71: predictIcicleBehavior,
-        // Future expansion: 72: predictAnotherBallBehavior,
     };
-
     /**
      * Core dispatcher for frame-by-frame entity behavior ticking.
      * @param {Object} ent - The entity clone being processed
@@ -215,14 +212,186 @@
             }
         }
     }
-
     /**
-     * Custom long-term trajectory simulation for Icicles.
-     * Projects freeze states during multi-tick path precomputations.
-     */
-function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
+ * Custom long-term trajectory simulation for Dripping balls (Type 30).
+ */
+    function simulateDrippingTrajectory(e, maxTimeMs, bounceZones) {
+        const stepMs = config.bounceSimStepMs || 12;
+        const ping = window._client.ping || 0; // Get the current client ping
+        let x = e.x;
+        let y = e.y;
+        let currentRadius = e.radius || 0;
+
+        let vx = e._vxMs || 0;
+        let vy = e._vyMs || 0;
+        let rVel = e._radiusVel || 0.0075;
+        let maxR = e._maxObservedRadius || 0;
+        let minR = e._minObservedRadius || 0;
+
+        // Initialize global cache for dripper speeds across ticks if it doesn't exist
+        if (!window._dripperSpeedCache) {
+            window._dripperSpeedCache = new Map();
+        }
+
+        // Capture and save the real speed when it's active (e.g., first frames when radius < 1)
+        if (e._speedMs && e._speedMs > 0) {
+            if (e.id !== undefined) {
+                window._dripperSpeedCache.set(e.id, e._speedMs);
+            }
+            e._cachedDripperSpeedMs = e._speedMs;
+        }
+
+        // Retrieve the stored speed from global map or local entity cache
+        const cachedSpeed = (e.id !== undefined ? window._dripperSpeedCache.get(e.id) : null) || e._cachedDripperSpeedMs;
+
+        // Fallback chain to ensure we always have a valid speed value
+        const speedMs = cachedSpeed ||
+              e._speedMs ||
+              config.dripperDefaultSpeedMs ||
+              1;
+
+        // Adjust remaining inflation time by subtracting ping, and scale speed accordingly
+        if (maxR > 0 && currentRadius < maxR && rVel > 0) {
+            const normalInflationTime = (maxR - currentRadius) / rVel;
+            const adjustedInflationTime = normalInflationTime - ping + 32;
+
+            // Handle cases where the adjusted time goes out of bounds (<= 0)
+            if (adjustedInflationTime <= 0) {
+                currentRadius = maxR;
+                rVel = 0; // Fully inflated immediately due to latency
+            } else {
+                rVel = (maxR - currentRadius) / adjustedInflationTime;
+            }
+        }
+
+        let isFrozen = false;
+
+        let zone = null;
+        if (bounceZones && bounceZones.length > 0) {
+            const zonePadding = 32;
+            for (const z of bounceZones) {
+                if (x >= z.x - zonePadding && x <= z.x + z.width + zonePadding &&
+                    y >= z.y - zonePadding && y <= z.y + z.height + zonePadding) {
+                    zone = z;
+                    break;
+                }
+            }
+        }
+
+        const points = [{ t: 0, x, y, radius: currentRadius }];
+
+        for (let t = stepMs; t <= maxTimeMs; t += stepMs) {
+            let previousRadius = currentRadius; // Save the radius before the simulation step
+            currentRadius += rVel * stepMs;
+
+            // ICICLE APPROACH: Catch the exact tick where inflation finishes
+            if (maxR > 0 && previousRadius < maxR && currentRadius >= maxR) {
+                currentRadius = maxR;
+
+                // Activate base falling speed if the ball was standing still
+                if (Math.abs(vx) < 1e-7 && Math.abs(vy) < 1e-7) {
+                    vy = speedMs;
+                    vx = 0;
+                }
+
+                // Calculate the excess time (overTime) remaining for movement
+                const overTime = rVel > 0 ? (previousRadius + rVel * stepMs - maxR) / rVel : 0;
+
+                // Instantly apply movement for the remaining time in this tick
+                x += vx * overTime;
+                y += vy * overTime;
+
+                points.push({ t, x, y, radius: currentRadius });
+                continue; // Skip the standard movement block for this tick
+            }
+
+            if (maxR > 0 && currentRadius > maxR) {
+                currentRadius = maxR;
+            }
+
+            // If the ball is still inflating, it is guaranteed to stand still
+            if (maxR > 0 && currentRadius < maxR) {
+                points.push({ t, x, y, radius: currentRadius });
+                continue;
+            }
+
+            if (!isFrozen && maxR > 0 && currentRadius >= maxR) {
+                if (Math.abs(vx) < 1e-7 && Math.abs(vy) < 1e-7) {
+                    vy = speedMs;
+                    vx = 0;
+                }
+            }
+
+            if (isFrozen) {
+                if (zone) {
+                    const bLeft = zone.x + currentRadius, bRight = zone.x + zone.width - currentRadius;
+                    const bTop = zone.y + currentRadius, bBottom = zone.y + zone.height - currentRadius;
+                    x = Math.max(bLeft, Math.min(bRight, x));
+                    y = Math.max(bTop, Math.min(bBottom, y));
+                }
+                points.push({ t, x, y, radius: currentRadius });
+                continue;
+            }
+
+            if (Math.abs(vx) < 1e-7 && Math.abs(vy) < 1e-7) {
+                points.push({ t, x, y, radius: currentRadius });
+                continue;
+            }
+
+            let remaining = stepMs, iter = 0;
+            while (remaining > 0.001 && iter++ < 6) {
+                if (!zone) {
+                    x += vx * remaining;
+                    y += vy * remaining;
+                    remaining = 0;
+                    break;
+                }
+
+                const bLeft = zone.x + currentRadius, bRight = zone.x + zone.width - currentRadius;
+                const bTop = zone.y + currentRadius, bBottom = zone.y + zone.height - currentRadius;
+
+                if ((x <= bLeft && vx < 0) || (x >= bRight && vx > 0) ||
+                    (y <= bTop && vy < 0) || (y >= bBottom && vy > 0)) {
+                    vx = 0;
+                    vy = 0;
+                    x = Math.max(bLeft, Math.min(bRight, x));
+                    y = Math.max(bTop, Math.min(bBottom, y));
+                    isFrozen = true;
+                    remaining = 0;
+                    break;
+                }
+
+                let tBounce = remaining;
+                let hitWall = false;
+
+                if (vx < 0) { const tw = (bLeft - x) / vx; if (tw >= 0 && tw <= tBounce) { tBounce = tw; hitWall = true; } }
+                else if (vx > 0) { const tw = (bRight - x) / vx; if (tw >= 0 && tw <= tBounce) { tBounce = tw; hitWall = true; } }
+
+                if (vy < 0) { const tw = (bTop - y) / vy; if (tw >= 0 && tw <= tBounce) { tBounce = tw; hitWall = true; } }
+                else if (vy > 0) { const tw = (bBottom - y) / vy; if (tw >= 0 && tw <= tBounce) { tBounce = tw; hitWall = true; } }
+
+                x += vx * tBounce;
+                y += vy * tBounce;
+                remaining -= tBounce;
+
+                if (hitWall) {
+                    vx = 0;
+                    vy = 0;
+                    x = Math.max(bLeft, Math.min(bRight, x));
+                    y = Math.max(bTop, Math.min(bBottom, y));
+                    isFrozen = true;
+                    remaining = 0;
+                    break;
+                }
+            }
+            points.push({ t, x, y, radius: currentRadius });
+        }
+        return points;
+    }
+
+    function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
         const ping = window._client.ping || 0;
-        const limitMs = 1032 - (ping * 0.5); // Динамический лимит, уменьшенный на пинг
+        const limitMs = 1032 - (ping * 0.5);
         const stepMs = config.bounceSimStepMs || 12;
 
         let x = e.x;
@@ -230,7 +399,6 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
         let simClock = e._clock || 0;
         let simWallHit = e._wallHit || false;
 
-        // Извлекаем базовые направления скоростей из сохраненных свойств
         let baseVx = e._vxMs || 0;
         let baseVy = e._vyMs || 0;
         if (Math.hypot(baseVx, baseVy) < 1e-6) {
@@ -238,7 +406,6 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
             baseVy = e._lastVyMs || 0;
         }
 
-        // Если время у стены превысило лимит, разворачиваем шар в обратную сторону
         if (simWallHit && (simClock - limitMs) > (ping * 0.5)) {
             simWallHit = false;
             baseVx = -baseVx;
@@ -248,10 +415,9 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
         let vx = simWallHit ? 0 : baseVx;
         let vy = simWallHit ? 0 : baseVy;
 
-        // Находим текущую игровую зону для определения точных границ стен
         let zone = null;
         if (bounceZones && bounceZones.length > 0) {
-            const zonePadding = 32; // Безопасный отступ для поиска зоны
+            const zonePadding = 32;
             for (const z of bounceZones) {
                 if (x >= z.x - zonePadding && x <= z.x + z.width + zonePadding &&
                     y >= z.y - zonePadding && y <= z.y + z.height + zonePadding) {
@@ -268,25 +434,19 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                 simClock += stepMs;
                 if (simClock >= limitMs) {
                     simWallHit = false;
-                    // Разворачиваем вектор движения после окончания таймера заморозки
                     baseVx = -baseVx;
                     baseVy = -baseVy;
                     vx = baseVx;
                     vy = baseVy;
 
-                    // Экстраполируем остаток времени шага после выхода из стазиса
                     const overTime = simClock - limitMs;
                     x += vx * overTime;
                     y += vy * overTime;
                 }
-                // КРИТИЧЕСКОЕ УСЛОВИЕ: пока simWallHit === true, координаты x и y НЕ меняются.
-                // Шар гарантированно стоит на месте касания до окончания таймера.
             } else {
-                // Обычное движение вперед
                 x += vx * stepMs;
                 y += vy * stepMs;
 
-                // Проверяем касание стены прямо в цикле симуляции (если зона найдена)
                 if (zone) {
                     const eR = e.radius || 15;
                     const bLeft = zone.x + eR;
@@ -295,11 +455,9 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                     const bBottom = zone.y + zone.height - eR;
 
                     if (x <= bLeft || x >= bRight || y <= bTop || y >= bBottom) {
-                        // Жестко фиксируем координаты клона в точке столкновения со стеной
                         x = Math.max(bLeft, Math.min(bRight, x));
                         y = Math.max(bTop, Math.min(bBottom, y));
 
-                        // Включаем режим удержания у стены и останавливаем симуляцию движения
                         simWallHit = true;
                         simClock = 0;
                         vx = 0;
@@ -351,7 +509,7 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                 e._evadeLastTime = now;
                 e._vxMs = 0;
                 e._vyMs = 0;
-                e._maxSpeedMs = 0; // Initialize storage for max speed
+                e._maxSpeedMs = 0;
                 e._speedMs = 0;
                 e._fx = e.x;
                 e._fy = e.y;
@@ -362,6 +520,12 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                     e._wallHit = false;
                     e._lastVxMs = 0;
                     e._lastVyMs = 0;
+                }
+                if (e.entityType === 30) {
+                    e._lastRadius = e.radius;
+                    e._radiusVel = 0.0075;
+                    e._maxObservedRadius = 0;
+                    e._minObservedRadius = 0;
                 }
                 continue;
             }
@@ -430,6 +594,26 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                         }
                     }
 
+                    if (e.entityType === 30) {
+                        if (e._lastRadius === undefined) e._lastRadius = e.radius;
+                        const deltaR = e.radius - e._lastRadius;
+
+                        if (deltaR < -3 || deltaR > 3) {
+                            e._minObservedRadius = e.radius;
+                            e._maxObservedRadius = e.radius * 4;
+                            e._vxMs = 0;
+                            e._vyMs = 0;
+                        } else if (deltaR > 0) {
+                            const currentRVel = deltaR / effectiveDt;
+                            if (currentRVel < 0.05) {
+                                e._radiusVel = e._radiusVel * 0.85 + currentRVel * 0.15;
+                            }
+                            e._vxMs = 0;
+                            e._vyMs = 0;
+                        }
+                        e._lastRadius = e.radius;
+                    }
+
                     e._evadeLastPos.x = e.x;
                     e._evadeLastPos.y = e.y;
                     e._evadeLastTime = now;
@@ -447,7 +631,6 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
             e._predX = e._fx + e._vxMs * predMs;
             e._predY = e._fy + e._vyMs * predMs;
 
-            // Tracking and state sync logic for Icicles (Type 71)
             if (e.entityType === 71) {
                 if (e._clock === undefined) e._clock = 0;
                 if (e._wallHit === undefined) e._wallHit = false;
@@ -543,6 +726,7 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
     function simulateEnemyTrajectory(e, maxTimeMs, bounceZones) {
         if (e.entityType === ENEMY_TYPE_WALL) return simulateWallHuggingTrajectory(e, maxTimeMs, bounceZones);
         if (e.entityType === 71) return simulateIcicleTrajectory(e, maxTimeMs, bounceZones);
+        if (e.entityType === 30) return simulateDrippingTrajectory(e, maxTimeMs, bounceZones);
 
         const eR = e.radius;
         let x = e.x, y = e.y, vx = e._vxMs || 0, vy = e._vyMs || 0;
@@ -589,18 +773,26 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
 
     function interpolateTrajectory(traj, timeMs) {
         if (!traj || traj.length === 0) return null;
-        if (timeMs <= 0) return { x: traj[0].x, y: traj[0].y };
+        if (timeMs <= 0) return { x: traj[0].x, y: traj[0].y, radius: traj[0].radius };
         const last = traj[traj.length - 1];
-        if (timeMs >= last.t) return { x: last.x, y: last.y };
+        if (timeMs >= last.t) return { x: last.x, y: last.y, radius: last.radius };
 
         let lo = 0, hi = traj.length - 1;
         while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (traj[mid].t <= timeMs) lo = mid; else hi = mid; }
 
         const a = traj[lo], b = traj[hi];
         const dt = b.t - a.t;
-        if (dt < 1e-6) return { x: a.x, y: a.y };
+        if (dt < 1e-6) return { x: a.x, y: a.y, radius: a.radius };
         const u = (timeMs - a.t) / dt;
-        return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
+
+        const res = {
+            x: a.x + (b.x - a.x) * u,
+            y: a.y + (b.y - a.y) * u
+        };
+        if (a.radius !== undefined && b.radius !== undefined) {
+            res.radius = a.radius + (b.radius - a.radius) * u;
+        }
+        return res;
     }
 
     function precomputeTrajectories(enemies, maxTimeMs, walkableZones) {
@@ -669,7 +861,6 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
             const id = String(numericId);
             const cloneId = String(-numericId - CLONE_OFFSET);
             const state = window.__enemyPredState[cloneId];
-
             // Update state on server message
             window.__enemyPredState[cloneId] = {
                 serverBaseTime: performance.now(),
@@ -861,7 +1052,7 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                 }
             }
 
-            if (entity.effects?.effects && Number(id) >= 0) { //fixed effect not clearing in ball with id 0
+            if (entity.effects?.effects && Number(id) >= 0) {
                 for (const key in entity.effects.effects) {
                     if (entity.effects.effects[key] && entity.effects.effects[key].radius !== undefined) {
                         entity.effects.effects[key].radius = 0;
@@ -919,7 +1110,7 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
 
             proto.render = function (ctx, camera) {
                 const isSelf = this.isLocalPlayer === true ||
-                               (window._client?.user?.self?.id && this.id === window._client.user.self.id);
+                      (window._client?.user?.self?.id && this.id === window._client.user.self.id);
 
                 if (isSelf && isPredictPlayerEnabled) {
                     const pd = window.__predictData;
@@ -987,7 +1178,7 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                     for (const id of Object.keys(liveGame.gameState.entities)) {
                         const numId = Number(id);
                         if (numId < 0) {
-                            const originalId = String(-numId - CLONE_OFFSET); // Fixed: Reversing the clone ID math with CLONE_OFFSET
+                            const originalId = String(-numId - CLONE_OFFSET);
                             const originalEnt = liveGame.gameState.entities[originalId];
                             const cloneEnt = liveGame.gameState.entities[id];
 
@@ -1010,6 +1201,10 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                                     hasVelocity = true;
                                 }
 
+                                if (cloneEnt.entityType === 30) {
+                                    hasVelocity = true;
+                                }
+
                                 if (hasVelocity) {
                                     cloneEnt.isDestroyed = false;
                                     if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
@@ -1028,6 +1223,9 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                                         if (trajPos) {
                                             idealX = trajPos.x;
                                             idealY = trajPos.y;
+                                            if (trajPos.radius !== undefined) {
+                                                cloneEnt.radius = trajPos.radius;
+                                            }
                                         }
                                     }
 
@@ -1037,10 +1235,15 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
                                         idealY = state.serverBaseY + state.vyMs * renderTimeMs;
                                     }
 
-                                    // 4. Smoothly blend towards the ideal position to hide micro-jumps from server corrections
-                                    const lerpFactor = 1 - Math.pow(0.2, dtMs / 16.66);
-                                    state.smoothX += (idealX - state.smoothX) * lerpFactor;
-                                    state.smoothY += (idealY - state.smoothY) * lerpFactor;
+                                    // Disabling lerp for dripping
+                                    if (cloneEnt.entityType === 30) {
+                                        state.smoothX = idealX;
+                                        state.smoothY = idealY;
+                                    } else { // 4. Smoothly blend towards the ideal position to hide micro-jumps from server corrections
+                                        const lerpFactor = 1 - Math.pow(0.2, dtMs / 16.66);
+                                        state.smoothX += (idealX - state.smoothX) * lerpFactor;
+                                        state.smoothY += (idealY - state.smoothY) * lerpFactor;
+                                    }
 
                                     // 5. Apply to the game engine's entity for rendering
                                     cloneEnt.x = state.smoothX;
@@ -1150,7 +1353,7 @@ function simulateIcicleTrajectory(e, maxTimeMs, bounceZones) {
         extraTickBtn.innerText = window._client.unlockFPS ? '🔓 Unlock FPS [ON]' : '🔒 Unlock FPS [OFF]';
         extraTickBtn.style.borderColor = window._client.unlockFPS ? '#0f0' : '#ffa500';
     });
-    // Entity cache cleanup
+
     setInterval(() => {
         const game = getGameRef();
         if (game?.gameState?.entities) {
