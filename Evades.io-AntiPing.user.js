@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades.io - Anti Ping Main
 // @namespace    https://evades.io/
-// @version      7.0.2
+// @version      8.0.0
 // @description  Anti ping for Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -20,7 +20,6 @@
 
     // ==================== EXTRAPOLATION SETTINGS ====================
     const SERVER_TICK_MS = 1000 / 60;
-    const CLONE_OFFSET = 10000000; // Offset to handle entity id === 0 correctly
 
     // ==================== BALL TYPE CONFIGURATION ====================
     const _ignoredTypes = new Set([62, 72, 199, 8, 113, 228, 136]);
@@ -55,7 +54,7 @@
 
             .replace(/ag\.emit\(([^)]+)\)/, (m, msgVar) => `(window._client && window._client.input && window._client.input(${msgVar}), ag.emit(${msgVar}))`)
             .replace("this.gameState.packetNumber===this.lastRenderedPacket", a => "this.gameState.packetNumber===this.lastRenderedPacket && !window._client.unlockFPS")
-
+            .replace("this.renderer.render(this.gameState)", a => "(window._client.preRender&&window._client.preRender(this.gameState),this.renderer.render(this.gameState),window._client.postRender&&window._client.postRender(this.gameState))")
         let nScr = document.createElement("script");
         nScr.setAttribute("type", "module");
         nScr.innerHTML = code;
@@ -130,29 +129,36 @@
         if (!isOverlayEnabled) return;
         if (msg.area) {
             window._client.selfCmdHistory = []; // Clear command history on area change
-            if (game?.gameState?.entities) {
-                for (const id of Object.keys(game.gameState.entities)) {
-                    if (Number(id) < 0) {
-                        delete game.gameState.entities[id];
-                    }
-                }
+            window.__enemyPredState = {}; // Clear enemy prediction state on area change
+        }
+
+        // Parse xyEntities into a map for fresh server positions
+        const serverUpdates = new Map();
+        if (msg.xyEntities) {
+            const buffer = msg.xyEntities;
+            const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+            const count = Math.floor(buffer.length / 12);
+            for (let i = 0; i < count; i++) {
+                const offset = i * 12;
+                const id = view.getUint32(offset, true);
+                const x = view.getFloat32(offset + 4, true);
+                const y = view.getFloat32(offset + 8, true);
+                serverUpdates.set(id, { x, y });
             }
         }
 
-        injectEnemies(msg);
+        processEnemyPredictions(serverUpdates);
     };
 
     // ==================== HOOK MANAGEMENT ====================
     let isOverlayEnabled = true;
-    let isHideOriginalEnabled = true;
     let isHideSelfEnabled = false;
     let isPredictPlayerEnabled = true;
     let isUIVisible = true;
 
     let currentArea = null;
-    let originalProps = new Map();
-    let originalVisibility = new Map();
     let originalSelfProps = null;
+    let __savedPositions = new Map();
     let gloopOriginalRenders = new Map();
 
     // ==================== CONFIG & GLOBALS FOR PREDICTION ====================
@@ -246,9 +252,9 @@
 
         // Fallback chain to ensure we always have a valid speed value
         const speedMs = cachedSpeed ||
-              e._speedMs ||
-              config.dripperDefaultSpeedMs ||
-              1;
+            e._speedMs ||
+            config.dripperDefaultSpeedMs ||
+            1;
 
         // Adjust remaining inflation time by subtracting ping, and scale speed accordingly
         if (maxR > 0 && currentRadius < maxR && rVel > 0) {
@@ -820,21 +826,25 @@
         }
     }
 
-    const injectEnemies = (msg) => {
+    const processEnemyPredictions = (serverUpdates = new Map()) => {
         const game = getGameRef();
         if (!game?.gameState?.entities) return;
         const gameState = game.gameState;
-
-        if (!msg.entities) msg.entities = [];
 
         window.__enemyPredState = window.__enemyPredState || {};
         const enemies = [];
         for (const [id, ent] of Object.entries(gameState.entities)) {
             const numericId = Number(id);
-            if (isNaN(numericId) || numericId < 0) continue;
             if (!ent.isEnemy || ent.isPlayer || ent.entityType === 130 || _ignoredTypes.has(ent.entityType)) continue;
             if ((ent.name || '').toLowerCase().includes('switch')) continue;
             if (typeof ent.x !== 'number' || typeof ent.y !== 'number' || !ent.radius) continue;
+
+            // Apply fresh xyEntities position before prediction calculation
+            const freshUpdate = serverUpdates.get(numericId);
+            if (freshUpdate) {
+                if (typeof freshUpdate.x === 'number') ent.x = freshUpdate.x;
+                if (typeof freshUpdate.y === 'number') ent.y = freshUpdate.y;
+            }
 
             enemies.push({ numericId, ent });
         }
@@ -850,19 +860,18 @@
 
         precomputeTrajectories(enemies.map(e => e.ent), predMs + 50, bounceZones);
 
-        // Clean up stale enemies from our sandbox state using the filtered array
-        const activeCloneIds = new Set(enemies.map(e => String(-e.numericId - CLONE_OFFSET)));
+        // Clean up stale enemies from prediction state
+        const activeIds = new Set(enemies.map(e => String(e.numericId)));
         for (const id of Object.keys(window.__enemyPredState)) {
-            if (!activeCloneIds.has(id)) delete window.__enemyPredState[id];
+            if (!activeIds.has(id)) delete window.__enemyPredState[id];
         }
 
-        // Inject clones for the filtered enemies
+        // Update prediction state on server message
         for (const { numericId, ent } of enemies) {
             const id = String(numericId);
-            const cloneId = String(-numericId - CLONE_OFFSET);
-            const state = window.__enemyPredState[cloneId];
-            // Update state on server message
-            window.__enemyPredState[cloneId] = {
+            const state = window.__enemyPredState[id];
+
+            window.__enemyPredState[id] = {
                 serverBaseTime: performance.now(),
                 serverBaseX: ent.x,
                 serverBaseY: ent.y,
@@ -873,31 +882,156 @@
                 trajValid: ent._trajValid,
                 smoothX: state ? state.smoothX : ent._predX,
                 smoothY: state ? state.smoothY : ent._predY,
-                radius: ent.radius // Save radius so clone never disappears if original gets 0 radius
+                radius: ent.radius
             };
-
-            const clone = Object.assign({}, ent, {
-                id: -numericId - CLONE_OFFSET,
-                x: window.__enemyPredState[cloneId].smoothX,
-                y: window.__enemyPredState[cloneId].smoothY,
-                radius: ent.radius, // Force real radius so clone isn't invisible
-                isDestroyed: false,
-            });
-
-            const storedProps = originalProps.get(id);
-            if (storedProps && storedProps.effectsData) {
-                clone.effects = ent.effects ? JSON.parse(JSON.stringify(ent.effects)) : {};
-                clone.effects.effects = JSON.parse(JSON.stringify(storedProps.effectsData));
-            } else if (ent.effects) {
-                try {
-                    clone.effects = JSON.parse(JSON.stringify(ent.effects));
-                } catch (e) {
-                    clone.effects = ent.effects;
-                }
-            }
-            msg.entities.push(clone);
         }
     };
+
+    // ==================== PRE/POST RENDER POSITION SWAP ====================
+    window._client.preRender = (gameState) => {
+        __savedPositions.clear();
+        if (!isOverlayEnabled || !gameState?.entities) return;
+
+        try {
+            const now = performance.now();
+            if (!window.__lastEnemyFrameTime) window.__lastEnemyFrameTime = now;
+            const dtMs = Math.min(now - window.__lastEnemyFrameTime, 50);
+            window.__lastEnemyFrameTime = now;
+
+            const selfId = gameState.selfId;
+
+            for (const [id, ent] of Object.entries(gameState.entities)) {
+                const numericId = Number(id);
+
+                // ---- Skip player entity (handled by render hook, not preRender) ----
+                const isSelf = ent.isLocalPlayer === true || id === String(selfId);
+                if (isSelf) continue;
+
+                // ---- Enemy prediction ----
+                if (!ent.isEnemy || ent.isPlayer) continue;
+                if (ent.entityType === 130 || _ignoredTypes.has(ent.entityType)) continue;
+                if ((ent.name || '').toLowerCase().includes('switch')) continue;
+
+                const state = window.__enemyPredState ? window.__enemyPredState[id] : null;
+                if (!state) continue;
+
+                // Apply type-specific client side prediction behaviors (e.g. Icicle wall hit clock)
+                predictEntityBehavior(ent, dtMs);
+
+                const currentMultiplier = ent.speedMultiplier !== undefined ? ent.speedMultiplier : 1;
+                let hasVelocity = (Math.abs(state.vxMs) > 0.0001 || Math.abs(state.vyMs) > 0.0001) && currentMultiplier > 0;
+
+                // Force position trajectory interpolation for type 71 to simulate unfreezing correctly
+                if (ent.entityType === 71) hasVelocity = true;
+                if (ent.entityType === 30) hasVelocity = true;
+
+                let savedRadius = undefined;
+
+                if (hasVelocity) {
+                    // 1. Time elapsed since the last server update for this enemy
+                    const T = now - state.serverBaseTime;
+
+                    // 2. The exact point in time we want to render on the trajectory
+                    const renderTimeMs = T + state.predMs;
+
+                    let idealX, idealY;
+
+                    // 3. Get the position from the trajectory
+                    if (state.trajValid && state.trajectory && state.trajectory.length > 0) {
+                        const trajPos = interpolateTrajectory(state.trajectory, renderTimeMs);
+                        if (trajPos) {
+                            idealX = trajPos.x;
+                            idealY = trajPos.y;
+                            if (trajPos.radius !== undefined && ent.radius !== trajPos.radius) {
+                                savedRadius = ent.radius;
+                                ent.radius = trajPos.radius;
+                            }
+                        }
+                    }
+
+                    // Fallback to straight line if trajectory failed
+                    if (idealX === undefined) {
+                        idealX = state.serverBaseX + state.vxMs * renderTimeMs;
+                        idealY = state.serverBaseY + state.vyMs * renderTimeMs;
+                    }
+
+                    // Disabling lerp for dripping
+                    if (ent.entityType === 30) {
+                        state.smoothX = idealX;
+                        state.smoothY = idealY;
+                    } else {
+                        // 4. Smoothly blend towards the ideal position to hide micro-jumps from server corrections
+                        const lerpFactor = 1 - Math.pow(0.2, dtMs / 16.66);
+                        state.smoothX += (idealX - state.smoothX) * lerpFactor;
+                        state.smoothY += (idealY - state.smoothY) * lerpFactor;
+                    }
+
+                    __savedPositions.set(id, { x: ent.x, y: ent.y, radius: savedRadius });
+                    ent.x = state.smoothX;
+                    ent.y = state.smoothY;
+                } else {
+                    // If an enemy has stopped (e.g. frozen by ability) render it at its server position
+                    __savedPositions.set(id, { x: ent.x, y: ent.y, radius: savedRadius });
+                    ent.x = state.serverBaseX;
+                    ent.y = state.serverBaseY;
+                    state.smoothX = state.serverBaseX;
+                    state.smoothY = state.serverBaseY;
+                }
+
+                // Icicle clock tracking on original entity
+                if (ent.entityType === 71 && ent._wallHit) {
+                    if (ent._clock === undefined) ent._clock = 0;
+                    ent._clock += dtMs;
+                }
+            }
+        } catch (e) {
+            console.error('[AntiPing] preRender error:', e);
+        }
+    };
+
+    window._client.postRender = (gameState) => {
+        try {
+            if (!gameState?.entities) return;
+
+            for (const [id, saved] of __savedPositions) {
+                const ent = gameState.entities[id];
+                if (ent) {
+                    ent.x = saved.x;
+                    ent.y = saved.y;
+                    if (saved.radius !== undefined) ent.radius = saved.radius;
+                }
+            }
+        } catch (e) {
+            console.error('[AntiPing] postRender error:', e);
+        }
+        __savedPositions.clear();
+    };
+
+    function suppressGloopRenders(game) {
+        if (!game?.gameState?.entities) return;
+        for (const [id, entity] of Object.entries(game.gameState.entities)) {
+            if (entity.entityType !== 136) continue;
+            if (!gloopOriginalRenders.has(id)) {
+                gloopOriginalRenders.set(id, entity.render);
+            }
+            entity.render = () => { };
+        }
+    }
+
+    function restoreGloopRenders() {
+        const game = getGameRef();
+        if (!game?.gameState?.entities) {
+            gloopOriginalRenders.clear();
+            return;
+        }
+        for (const [id, origRender] of gloopOriginalRenders) {
+            const entity = game.gameState.entities[id];
+            if (entity && typeof origRender === 'function') {
+                entity.render = origRender;
+            }
+        }
+        gloopOriginalRenders.clear();
+    }
 
     function cacheIncomingAuras(game) {
         if (!game?.gameState?.entities) return;
@@ -1018,82 +1152,6 @@
         }
     }
 
-    function hideOriginalBalls(game) {
-        if (!game?.gameState?.entities) return;
-        const selfId = game.gameState.selfId;
-
-        for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (Number(id) < 0) continue;
-
-            if (entity.entityType === 136) {
-                if (!gloopOriginalRenders.has(id)) {
-                    gloopOriginalRenders.set(id, entity.render);
-                }
-                entity.render = () => { };
-                continue;
-            }
-
-            if (!entity.isEnemy || entity.nick !== undefined || entity.entityType === 118 || entity.entityType === 113 || _ignoredTypes.has(entity.entityType) || entity.id === selfId || entity.isPlayer) continue;
-            if (entity.entityType === 130 || (entity.name || '').toLowerCase().includes('switch')) continue;
-
-            if (!originalVisibility.has(id)) originalVisibility.set(id, entity.isDestroyed);
-
-            if (!originalProps.has(id) && entity.effects && entity.effects.effects) {
-                try {
-                    originalProps.set(id, {
-                        hasEffects: true,
-                        effectsData: JSON.parse(JSON.stringify(entity.effects.effects))
-                    });
-                } catch (e) {
-                    originalProps.set(id, {
-                        hasEffects: true,
-                        effectsData: entity.effects.effects
-                    });
-                }
-            }
-
-            if (entity.effects?.effects && Number(id) >= 0) {
-                for (const key in entity.effects.effects) {
-                    if (entity.effects.effects[key] && entity.effects.effects[key].radius !== undefined) {
-                        entity.effects.effects[key].radius = 0;
-                    }
-                }
-            }
-            entity.isDestroyed = true;
-        }
-    }
-
-    function restoreOriginalBalls(game) {
-        if (!game?.gameState?.entities) return;
-
-        for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (entity.entityType === 136 && gloopOriginalRenders.has(id)) {
-                entity.render = gloopOriginalRenders.get(id);
-            }
-        }
-        gloopOriginalRenders.clear();
-
-        for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (originalVisibility.has(id)) {
-                entity.isDestroyed = originalVisibility.get(id);
-                originalVisibility.delete(id);
-            }
-
-            if (originalProps.has(id)) {
-                const stored = originalProps.get(id);
-                if (stored.effectsData) {
-                    if (!entity.effects) entity.effects = {};
-                    if (!entity.effects.effects) entity.effects.effects = {};
-
-                    for (const key in stored.effectsData) {
-                        entity.effects.effects[key] = stored.effectsData[key];
-                    }
-                }
-                originalProps.delete(id);
-            }
-        }
-    }
-
     // ========== PLAYER CLASS COORDINATE SUBSTITUTION HOOK ==========
     function runPlayerRenderHook() {
         const game = getGameRef();
@@ -1109,8 +1167,7 @@
             proto._originalRender = proto.render;
 
             proto.render = function (ctx, camera) {
-                const isSelf = this.isLocalPlayer === true ||
-                      (window._client?.user?.self?.id && this.id === window._client.user.self.id);
+                const isSelf = this.isLocalPlayer === true || (window._client?.user?.self?.id && this.id === window._client.user.self.id);
 
                 if (isSelf && isPredictPlayerEnabled) {
                     const pd = window.__predictData;
@@ -1136,7 +1193,6 @@
                 }
                 return this._originalRender.call(this, ctx, camera);
             };
-            console.log("%c[RenderHook] Successfully intercepted player class render prototype!", "color: #00ff00; font-weight: bold;");
         }
     }
 
@@ -1148,12 +1204,8 @@
         runPlayerRenderHook();
 
         if (currentArea !== game.area) {
-            const liveGame = getGameRef();
-
-            gloopOriginalRenders.clear();
+            restoreGloopRenders();
             currentArea = game.area;
-            originalProps.clear();
-            originalVisibility.clear();
             window.__gloopOffsets = [];
         }
 
@@ -1168,113 +1220,8 @@
                 }
 
                 cacheIncomingAuras(liveGame);
-
-                const now = performance.now();
-                if (!window.__lastEnemyFrameTime) window.__lastEnemyFrameTime = now;
-                const dtMs = Math.min(now - window.__lastEnemyFrameTime, 50);
-                window.__lastEnemyFrameTime = now;
-
-                if (liveGame?.gameState?.entities) {
-                    for (const id of Object.keys(liveGame.gameState.entities)) {
-                        const numId = Number(id);
-                        if (numId < 0) {
-                            const originalId = String(-numId - CLONE_OFFSET);
-                            const originalEnt = liveGame.gameState.entities[originalId];
-                            const cloneEnt = liveGame.gameState.entities[id];
-
-                            if (!originalEnt) {
-                                delete liveGame.gameState.entities[id];
-                                if (window.__enemyPredState) delete window.__enemyPredState[id];
-                                continue;
-                            }
-
-                            const state = window.__enemyPredState ? window.__enemyPredState[id] : null;
-                            if (state) {
-                                // Apply type-specific client side prediction behaviors (e.g. Icicle wall hit clock)
-                                predictEntityBehavior(cloneEnt, dtMs);
-
-                                const currentMultiplier = cloneEnt.speedMultiplier !== undefined ? cloneEnt.speedMultiplier : 1;
-                                let hasVelocity = (Math.abs(state.vxMs) > 0.0001 || Math.abs(state.vyMs) > 0.0001) && currentMultiplier > 0;
-
-                                // Force position trajectory interpolation for type 71 to simulate unfreezing correctly
-                                if (cloneEnt.entityType === 71) {
-                                    hasVelocity = true;
-                                }
-
-                                if (cloneEnt.entityType === 30) {
-                                    hasVelocity = true;
-                                }
-
-                                if (hasVelocity) {
-                                    cloneEnt.isDestroyed = false;
-                                    if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
-
-                                    // 1. Time elapsed since the last server update for this enemy
-                                    const T = now - state.serverBaseTime;
-
-                                    // 2. The exact point in time we want to render on the trajectory
-                                    const renderTimeMs = T + state.predMs;
-
-                                    let idealX, idealY;
-
-                                    // 3. Get the position from the trajectory
-                                    if (state.trajValid && state.trajectory && state.trajectory.length > 0) {
-                                        const trajPos = interpolateTrajectory(state.trajectory, renderTimeMs);
-                                        if (trajPos) {
-                                            idealX = trajPos.x;
-                                            idealY = trajPos.y;
-                                            if (trajPos.radius !== undefined) {
-                                                cloneEnt.radius = trajPos.radius;
-                                            }
-                                        }
-                                    }
-
-                                    // Fallback to straight line if trajectory failed
-                                    if (idealX === undefined) {
-                                        idealX = state.serverBaseX + state.vxMs * renderTimeMs;
-                                        idealY = state.serverBaseY + state.vyMs * renderTimeMs;
-                                    }
-
-                                    // Disabling lerp for dripping
-                                    if (cloneEnt.entityType === 30) {
-                                        state.smoothX = idealX;
-                                        state.smoothY = idealY;
-                                    } else { // 4. Smoothly blend towards the ideal position to hide micro-jumps from server corrections
-                                        const lerpFactor = 1 - Math.pow(0.2, dtMs / 16.66);
-                                        state.smoothX += (idealX - state.smoothX) * lerpFactor;
-                                        state.smoothY += (idealY - state.smoothY) * lerpFactor;
-                                    }
-
-                                    // 5. Apply to the game engine's entity for rendering
-                                    cloneEnt.x = state.smoothX;
-                                    cloneEnt.y = state.smoothY;
-                                } else {
-                                    // If an enemy has stopped (e.g. frozen by ability) render it at its server position
-                                    cloneEnt.isDestroyed = false;
-                                    if (cloneEnt.radius === 0 && originalEnt.radius > 0) cloneEnt.radius = originalEnt.radius;
-                                    cloneEnt.x = state.serverBaseX;
-                                    cloneEnt.y = state.serverBaseY;
-                                    state.smoothX = state.serverBaseX;
-                                    state.smoothY = state.serverBaseY;
-                                }
-                            }
-                        } else {
-                            // Continuously track clock increments using local precise frame time deltas for real icicle entities
-                            const originalEnt = liveGame.gameState.entities[id];
-                            if (originalEnt && originalEnt.entityType === 71) {
-                                if (originalEnt._wallHit) {
-                                    if (originalEnt._clock === undefined) originalEnt._clock = 0;
-                                    originalEnt._clock += dtMs;
-                                }
-                            }
-                        }
-                    }
-                }
-
+                suppressGloopRenders(liveGame);
                 updateSelfVisibility(liveGame);
-
-                if (isHideOriginalEnabled) hideOriginalBalls(liveGame);
-                else restoreOriginalBalls(liveGame);
 
                 const result = this._originalRender.call(this, nativeCtx, cam);
 
@@ -1304,74 +1251,45 @@
         if (!isOverlayEnabled) {
             const game = getGameRef();
             if (game) {
-                restoreOriginalBalls(game);
+                restoreGloopRenders();
                 if (originalSelfProps && game.gameState?.entities?.[game.gameState.selfId]) {
                     game.gameState.entities[game.gameState.selfId].isDeparted = originalSelfProps.isDeparted;
                     originalSelfProps = null;
                 }
-                if (game.gameState?.entities) {
-                    for (const id of Object.keys(game.gameState.entities)) {
-                        if (Number(id) < 0) delete game.gameState.entities[id];
-                    }
-                }
             }
-            originalVisibility.clear();
-            originalProps.clear();
         }
 
         overlayBtn.innerText = `🎨 OVERLAY [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
         overlayBtn.style.borderColor = isOverlayEnabled ? '#0f0' : '#f00';
 
-        hideBtn.innerText = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
-        hideBtn.style.borderColor = isHideOriginalEnabled ? '#f0f' : '#0ff';
         selfBtn.innerText = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
-        selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
         predictPlayerBtn.innerText = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
-    const hideBtn = createBtn(110, '👻 HIDE ORIGINALS [ON]', '#f0f', () => {
-        isHideOriginalEnabled = !isHideOriginalEnabled;
-        hideBtn.innerText = `👻 HIDE ORIGINALS [${isHideOriginalEnabled ? 'ON' : 'OFF'}]`;
-        hideBtn.style.borderColor = isHideOriginalEnabled ? '#f0f' : '#0ff';
-    });
-
-    const selfBtn = createBtn(160, '👤 HIDE SELF [OFF]', '#ffa', () => {
+    const selfBtn = createBtn(110, '👤 HIDE SELF [OFF]', '#ffa', () => {
         isHideSelfEnabled = !isHideSelfEnabled;
         selfBtn.innerText = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
         selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
     });
 
-    const predictPlayerBtn = createBtn(210, '🚀 PREDICT PLAYER [ON]', '#0f0', () => {
+    const predictPlayerBtn = createBtn(160, '🚀 PREDICT PLAYER [ON]', '#0f0', () => {
         isPredictPlayerEnabled = !isPredictPlayerEnabled;
         predictPlayerBtn.innerText = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
-    const extraTickBtn = createBtn(260, '🔒 Unlock FPS [OFF]', '#ffa500', () => {
+    const extraTickBtn = createBtn(210, '🔒 Unlock FPS [OFF]', '#ffa500', () => {
         window._client.unlockFPS = !window._client.unlockFPS;
         extraTickBtn.innerText = window._client.unlockFPS ? '🔓 Unlock FPS [ON]' : '🔒 Unlock FPS [OFF]';
         extraTickBtn.style.borderColor = window._client.unlockFPS ? '#0f0' : '#ffa500';
     });
 
-    setInterval(() => {
-        const game = getGameRef();
-        if (game?.gameState?.entities) {
-            const existingIds = new Set(Object.keys(game.gameState.entities));
-            for (const [id] of originalProps) {
-                if (!existingIds.has(id)) originalProps.delete(id);
-            }
-            for (const [id] of originalVisibility) {
-                if (!existingIds.has(id)) originalVisibility.delete(id);
-            }
-        }
-    }, 4000);
-
     window.addEventListener('keydown', (e) => {
         if (e.key === 'PageUp') {
             e.preventDefault();
             isUIVisible = !isUIVisible;
-            [overlayBtn, hideBtn, selfBtn, predictPlayerBtn, extraTickBtn].forEach(b => b.style.display = isUIVisible ? 'block' : 'none');
+            [overlayBtn, selfBtn, predictPlayerBtn, extraTickBtn].forEach(b => b.style.display = isUIVisible ? 'block' : 'none');
         }
     });
 

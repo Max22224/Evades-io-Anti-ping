@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movement predict
 // @namespace    https://evades.io/
-// @version      7.0.1
+// @version      7.0.2
 // @description  Prediction of player movement.
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -32,6 +32,7 @@
     // ГЛОБАЛЬНЫЕ ДЛЯ СКРИПТА ПЕРЕМЕННЫЕ
     const entityVelocities = new Map();
     let lastAuraCheckTime = performance.now();
+    let lastActiveEnemyTicks = 0;
 
     // Отслеживание мыши и Shift в реальном времени
     let currentMouseX = window.innerWidth / 2;
@@ -433,16 +434,17 @@
 
         // Smooth pending tick count (faster 0.65/0.35 for high ping stability)
         const rawPendingTicks = pending.length + 1;
+        const enemyBaseTicks = pending.length; // Enemy uses exact queue length to match player's visual timeline
 
         // ============ ENEMY PREDICTION DELAY ============
         // Remember the last measured delay ONLY while actively sending inputs
-        if (rawPendingTicks > 1 && hasMouseControl) {
-            window.__lastActivePendingTicks = rawPendingTicks;
+        if (enemyBaseTicks > 0 && hasMouseControl) {
+            lastActiveEnemyTicks = enemyBaseTicks;
         }
         // Enemies use the remembered delay when standing still so they don't snap backwards
-        let enemyPredTicks = rawPendingTicks;
-        if (rawPendingTicks <= 1 && !hasMouseControl && window.__lastActivePendingTicks) {
-            enemyPredTicks = window.__lastActivePendingTicks;
+        let enemyPredTicks = enemyBaseTicks;
+        if (enemyBaseTicks === 0 && !hasMouseControl && lastActiveEnemyTicks) {
+            enemyPredTicks = lastActiveEnemyTicks;
         }
         window.__enemySmoothPendingTicks = window.__enemySmoothPendingTicks || enemyPredTicks;
         window.__enemySmoothPendingTicks += (enemyPredTicks - window.__enemySmoothPendingTicks) * (1 - Math.pow(0.65, ticksElapsed));
