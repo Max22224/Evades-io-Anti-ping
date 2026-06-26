@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movement predict
 // @namespace    https://evades.io/
-// @version      7.0.2
+// @version      7.0.3
 // @description  Prediction of player movement.
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -14,7 +14,7 @@
 (() => {
     'use strict';
 
-    let isEnabled = true;
+    let isEnabled = localStorage.getItem('antiping_scripts') !== 'false';
     let isDebugVisible = false;
     let currentArea = null;
     let originalRender = null;
@@ -767,6 +767,7 @@
 
     window.toggleCam = () => {
         isEnabled = !isEnabled;
+        localStorage.setItem('antiping_scripts', String(isEnabled));
     };
 
     setInterval(runRenderHook, 16.66);

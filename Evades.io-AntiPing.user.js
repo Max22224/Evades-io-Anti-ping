@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades.io - Anti Ping Main
 // @namespace    https://evades.io/
-// @version      8.0.0
+// @version      8.0.1
 // @description  Anti ping for Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -14,17 +14,29 @@
 (() => {
     'use strict';
 
-    // ==================== GRAPHICS SETTINGS ====================
+    // ==================== SETTINGS PERSISTENCE ====================
+    const loadSetting = (key, defaultVal) => {
+        const val = localStorage.getItem(key);
+        return val === null ? defaultVal : val === 'true';
+    };
+    const saveSetting = (key, val) => localStorage.setItem(key, String(val));
+
+    // ==================== CONFIG & GLOBALS ====================
     const DEFAULT_PLAYER_RADIUS = 15;
     const PLAYER_ALPHA = 0.7;
-
-    // ==================== EXTRAPOLATION SETTINGS ====================
     const SERVER_TICK_MS = 1000 / 60;
-
-    // ==================== BALL TYPE CONFIGURATION ====================
     const _ignoredTypes = new Set([62, 72, 199, 8, 113, 228, 136]);
 
-    // ==================== Main Input / Output Hook ====================
+    let isOverlayEnabled = loadSetting('antiping_scripts', true);
+    let isHideSelfEnabled = loadSetting('antiping_hideself', false);
+    let isPredictPlayerEnabled = loadSetting('antiping_predictp', true);
+    let isUIVisible = true;
+
+    let currentArea = null;
+    let originalSelfProps = null;
+    let __savedPositions = new Map();
+    let gloopOriginalRenders = new Map();
+
     window._client = window._client || {};
     Object.assign(window._client, {
         seqQueue: [],
@@ -32,7 +44,7 @@
         selfAcked: null,
         ping: 0,
         pingHistory: [],
-        unlockFPS: false
+        unlockFPS: loadSetting('antiping_unlockfps', false)
     });
 
     let _obs = new MutationObserver((ev) => {
@@ -66,7 +78,7 @@
     });
     _obs.observe(document, { childList: true, subtree: true });
 
-    // ==================== MSG EVENT LOGIC FUNCTIONS ====================
+    // ==================== Main Input / Output Hook ====================
     window._client.input = (msg) => {
         if (msg.sequence) {
             window._client.seqQueue.push([msg.sequence, +new Date()]);
@@ -89,7 +101,8 @@
     };
 
     window._client.onMessage = (msg) => {
-        if (!msg.entities) msg.entities = [];
+        if (msg.pong) return; // Skip ping messages
+        if (!isOverlayEnabled) return;
 
         const game = getGameRef();
         let me = msg?.globalEntities?.find(e => e.id === game?.gameState?.selfId);
@@ -125,8 +138,6 @@
             window._client.seqQueue = window._client.seqQueue.filter(q => q[0] > msg.sequence);
         }
 
-        if (msg.pong) return; // Skip ping messages
-        if (!isOverlayEnabled) return;
         if (msg.area) {
             window._client.selfCmdHistory = []; // Clear command history on area change
             window.__enemyPredState = {}; // Clear enemy prediction state on area change
@@ -150,18 +161,6 @@
         processEnemyPredictions(serverUpdates);
     };
 
-    // ==================== HOOK MANAGEMENT ====================
-    let isOverlayEnabled = true;
-    let isHideSelfEnabled = false;
-    let isPredictPlayerEnabled = true;
-    let isUIVisible = true;
-
-    let currentArea = null;
-    let originalSelfProps = null;
-    let __savedPositions = new Map();
-    let gloopOriginalRenders = new Map();
-
-    // ==================== CONFIG & GLOBALS FOR PREDICTION ====================
     const config = {
         bounceDetectAngle: Math.PI / 3,
         enemyEmaAlpha: 0.15,
@@ -1244,10 +1243,10 @@
         document.body.appendChild(btn);
         return btn;
     }
-
-    const overlayBtn = createBtn(60, '🎨 Scripts [ON]', '#0f0', () => {
+    const scriptsBtn = createBtn(60, `🎨 Scripts [${isOverlayEnabled ? 'ON' : 'OFF'}]`, isOverlayEnabled ? '#0f0' : '#f00', () => {
         isOverlayEnabled = !isOverlayEnabled;
         window.toggleCam()
+        saveSetting('antiping_scripts', isOverlayEnabled);
         if (!isOverlayEnabled) {
             const game = getGameRef();
             if (game) {
@@ -1259,37 +1258,41 @@
             }
         }
 
-        overlayBtn.innerText = `🎨 OVERLAY [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
-        overlayBtn.style.borderColor = isOverlayEnabled ? '#0f0' : '#f00';
+        scriptsBtn.innerText = `🎨 Scripts [${isOverlayEnabled ? 'ON' : 'OFF'}]`;
+        scriptsBtn.style.borderColor = isOverlayEnabled ? '#0f0' : '#f00';
 
         selfBtn.innerText = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
+        selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
         predictPlayerBtn.innerText = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
-    const selfBtn = createBtn(110, '👤 HIDE SELF [OFF]', '#ffa', () => {
+    const selfBtn = createBtn(110, `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`, isHideSelfEnabled ? '#f0f' : '#ffa', () => {
         isHideSelfEnabled = !isHideSelfEnabled;
+        saveSetting('antiping_hideself', isHideSelfEnabled);
         selfBtn.innerText = `👤 HIDE SELF [${isHideSelfEnabled ? 'ON' : 'OFF'}]`;
         selfBtn.style.borderColor = isHideSelfEnabled ? '#f0f' : '#ffa';
     });
 
-    const predictPlayerBtn = createBtn(160, '🚀 PREDICT PLAYER [ON]', '#0f0', () => {
+    const predictPlayerBtn = createBtn(160, `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`, isPredictPlayerEnabled ? '#0f0' : '#f00', () => {
         isPredictPlayerEnabled = !isPredictPlayerEnabled;
+        saveSetting('antiping_predictp', isPredictPlayerEnabled);
         predictPlayerBtn.innerText = `🚀 PREDICT PLAYER [${isPredictPlayerEnabled ? 'ON' : 'OFF'}]`;
         predictPlayerBtn.style.borderColor = isPredictPlayerEnabled ? '#0f0' : '#f00';
     });
 
-    const extraTickBtn = createBtn(210, '🔒 Unlock FPS [OFF]', '#ffa500', () => {
+    const unlockFPSBtn = createBtn(210, window._client.unlockFPS ? '🔓 Unlock FPS [ON]' : '🔒 Unlock FPS [OFF]', window._client.unlockFPS ? '#0f0' : '#ffa500', () => {
         window._client.unlockFPS = !window._client.unlockFPS;
-        extraTickBtn.innerText = window._client.unlockFPS ? '🔓 Unlock FPS [ON]' : '🔒 Unlock FPS [OFF]';
-        extraTickBtn.style.borderColor = window._client.unlockFPS ? '#0f0' : '#ffa500';
+        saveSetting('antiping_unlockfps', window._client.unlockFPS);
+        unlockFPSBtn.innerText = window._client.unlockFPS ? '🔓 Unlock FPS [ON]' : '🔒 Unlock FPS [OFF]';
+        unlockFPSBtn.style.borderColor = window._client.unlockFPS ? '#0f0' : '#ffa500';
     });
 
     window.addEventListener('keydown', (e) => {
         if (e.key === 'PageUp') {
             e.preventDefault();
             isUIVisible = !isUIVisible;
-            [overlayBtn, selfBtn, predictPlayerBtn, extraTickBtn].forEach(b => b.style.display = isUIVisible ? 'block' : 'none');
+            [scriptsBtn, selfBtn, predictPlayerBtn, unlockFPSBtn].forEach(b => b.style.display = isUIVisible ? 'block' : 'none');
         }
     });
 
