@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movement predict
 // @namespace    https://evades.io/
-// @version      7.0.4
+// @version      8.0.0
 // @description  Prediction of player movement.
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -141,10 +141,10 @@
         const isValidDt = dt > 0.005 && dt < 0.5;
 
         for (const [entId, ent] of Object.entries(entities)) {
-            if (!ent || ent === player || Number(entId) > 0) continue;
+            if (!ent || ent === player) continue;
 
-            const currentEntX = (ent.pos && ent.pos.x !== undefined) ? ent.pos.x : ent.x;
-            const currentEntY = (ent.pos && ent.pos.y !== undefined) ? ent.pos.y : ent.y;
+            const currentEntX = ent.x;
+            const currentEntY = ent.y;
             if (currentEntX === undefined || currentEntY === undefined) continue;
 
             let entVx = 0, entVy = 0;
@@ -327,7 +327,7 @@
         if (poisonSniperTimer > 0) poisonSniperTimer -= ticksElapsed;
         const pRadius = player.radius || 15;
         safeForEach(game.gameState.entities, (ent) => {
-            if (!ent || ent === player || Number(ent.id) > 0) return;
+            if (!ent || ent === player) return;
 
             const entType = ent.entityType;
 
@@ -335,8 +335,8 @@
             const isPoisonSniper = (entType == 121 || entType == 122);
 
             if (isPoisonGhost || isPoisonSniper) {
-                const entX = (ent.pos && ent.pos.x !== undefined) ? ent.pos.x : ent.x;
-                const entY = (ent.pos && ent.pos.y !== undefined) ? ent.pos.y : ent.y;
+                const entX = ent.x;
+                const entY = ent.y;
 
                 if (entX === undefined || entY === undefined) return;
 
@@ -392,11 +392,11 @@
                     safeForEach(entitiesList, (ent) => {
                         if (!ent || !ent.isPlayer) return;
                         if (ent.IsLocalPlayer || ent.isLocalPlayer || ent === player) return;
-                        const entX = (ent.pos && ent.pos.x !== undefined) ? ent.pos.x : ent.x;
-                        const entY = (ent.pos && ent.pos.y !== undefined) ? ent.pos.y : ent.y;
+                        const entX = ent.x;
+                        const entY = ent.y;
                         const distanceToTarget = Math.hypot(entX - pX, entY - pY);
                         if (distanceToTarget <= 30) {
-                            const ts = ent.totalspeed !== undefined ? ent.totalspeed : ent.totalSpeed;
+                            const ts = ent.totalSpeed;
                             const s = ent.speed;
                             const invuln = ent.IsInvulnerable || ent.isInvulnerable || ent.invulnerable;
                             const hasTargetSpeed = (ts === 0 || ts === 30 || ts === 60 || ts === 90 || ts === 120 || (ts === 150 && s !== 150));
