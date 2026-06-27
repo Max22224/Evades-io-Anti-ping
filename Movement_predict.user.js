@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movement predict
 // @namespace    https://evades.io/
-// @version      7.0.3
+// @version      7.0.4
 // @description  Prediction of player movement.
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -132,8 +132,8 @@
         const entities = game.entities || game.gameState?.entities;
         if (!entities) return aura;
 
-        const pX = futurePx !== undefined ? futurePx : ((player.pos && player.pos.x !== undefined) ? player.pos.x : player.x);
-        const pY = futurePy !== undefined ? futurePy : ((player.pos && player.pos.y !== undefined) ? player.pos.y : player.y);
+        const pX = futurePx ?? player.x;
+        const pY = futurePy ?? player.y;
         const pRadPx = player.radius || 15;
 
         const now = performance.now();
@@ -256,8 +256,8 @@
     }
 
     function isPlayerInSafeZone(player, game) {
-        const pX = (player.pos && player.pos.x !== undefined) ? player.pos.x : player.x;
-        const pY = (player.pos && player.pos.y !== undefined) ? player.pos.y : player.y;
+        const pX = player.x;
+        const pY = player.y;
 
         let zonesList = game.area.zones.list();
 
@@ -286,8 +286,9 @@
         const ticksElapsed = dt * 60;
         window.__lastPlayerFrameTime = now;
 
-        const pX = (player.pos && player.pos.x !== undefined) ? player.pos.x : player.x;
-        const pY = (player.pos && player.pos.y !== undefined) ? player.pos.y : player.y;
+        const _realPos = window.__playerRealPos;
+        const pX = _realPos ? _realPos.x : player.x;
+        const pY = _realPos ? _realPos.y : player.y;
         const camera = game?.camera;
 
         // ================= ZONE FRICTION =================
@@ -694,6 +695,7 @@
 
         return { x: window.__smoothPredX, y: window.__smoothPredY };
     }
+    window.__getSmoothCameraPrediction = getSmoothCameraPrediction
 
     function updateDebugUI(base, add, final, slow, voidState, slipperyState, voidTicks, isIced, magmaxActive, nightActive, poisonTicks, maxMouseDist, cursorSpeed, currentDist, pullX, pullY, dynamicTicks, avgVx, avgVy, predVx, predVy, moveAngle, targetAngle) {
         const pullMag = Math.hypot(pullX, pullY);
@@ -741,7 +743,16 @@
                     const liveGame = getGameRef();
 
                     if (isEnabled && liveGame && liveGame.player && cam) {
-                        const predictedPos = getSmoothCameraPrediction(liveGame.player, liveGame);
+                        let predictedPos;
+
+                        if (window.__predictionCalculatedThisFrame) {
+                            // preRender already calculated this frame — skip recalculation
+                            window.__predictionCalculatedThisFrame = false;
+                            predictedPos = window.__predictData || liveGame.player;
+                        } else {
+                            // Overlay disabled or preRender didn't run — calculate normally
+                            predictedPos = getSmoothCameraPrediction(liveGame.player, liveGame);
+                        }
 
                         if (typeof cam.centerOn === 'function') {
                             cam.centerOn(predictedPos);
@@ -753,7 +764,7 @@
                         }
                     } else if (liveGame && liveGame.player && cam) {
                         if (typeof cam.centerOn === 'function') {
-                            cam.centerOn(liveGame.player.pos || liveGame.player);
+                            cam.centerOn(liveGame.player);
                         }
                     }
 

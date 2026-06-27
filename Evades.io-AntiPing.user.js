@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades.io - Anti Ping Main
 // @namespace    https://evades.io/
-// @version      8.0.1
+// @version      8.1.0
 // @description  Anti ping for Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -35,7 +35,6 @@
     let currentArea = null;
     let originalSelfProps = null;
     let __savedPositions = new Map();
-    let gloopOriginalRenders = new Map();
 
     window._client = window._client || {};
     Object.assign(window._client, {
@@ -889,6 +888,7 @@
     // ==================== PRE/POST RENDER POSITION SWAP ====================
     window._client.preRender = (gameState) => {
         __savedPositions.clear();
+        window.__playerRealPos = undefined;
         if (!isOverlayEnabled || !gameState?.entities) return;
 
         try {
@@ -898,11 +898,83 @@
             window.__lastEnemyFrameTime = now;
 
             const selfId = gameState.selfId;
+            const selfEnt = gameState.entities[selfId];
+            // ---- Update player prediction BEFORE swapping ----
+            if (isPredictPlayerEnabled && window.__getSmoothCameraPrediction) {
+                const game = getGameRef();
+                if (game?.player) {
+                    window.__getSmoothCameraPrediction(game.player, game);
+                    window.__predictionCalculatedThisFrame = true;
+                }
+            }
 
+            const pd = window.__predictData;
+            const hasPlayerPrediction = isPredictPlayerEnabled && pd && (now - pd.time) < 100;
+
+            // ---- Swap player position in all locations ----
+            if (hasPlayerPrediction && selfId != null) {
+                if (selfEnt) {
+                    window.__playerRealPos = { x: selfEnt.x, y: selfEnt.y };
+                    __savedPositions.set(String(selfId), { ent: selfEnt, x: selfEnt.x, y: selfEnt.y });
+                    selfEnt.x = pd.x;
+                    selfEnt.y = pd.y;
+                }
+                // Also swap in globalEntities
+                if (Array.isArray(gameState.globalEntities)) {
+                    for (const gEnt of gameState.globalEntities) {
+                        if (gEnt && gEnt.id === selfId && gEnt !== selfEnt) {
+                            __savedPositions.set('_gEnt_' + selfId, { ent: gEnt, x: gEnt.x, y: gEnt.y });
+                            gEnt.x = pd.x;
+                            gEnt.y = pd.y;
+                        }
+                    }
+                }
+                // Also swap gameState.self.entity
+                const selfEntity = gameState.self?.entity;
+                if (selfEntity && selfEntity !== selfEnt) {
+                    __savedPositions.set('_selfEnt_', { ent: selfEntity, x: selfEntity.x, y: selfEntity.y });
+                    selfEntity.x = pd.x;
+                    selfEntity.y = pd.y;
+                }
+            }
+
+            // ---- Hide self visibility ----
+            if (selfId != null) {
+                const selfEnt = gameState.entities[selfId];
+                if (selfEnt) {
+                    if (isHideSelfEnabled) {
+                        if (!originalSelfProps) originalSelfProps = { isDeparted: selfEnt.isDeparted };
+                        selfEnt.isDeparted = true;
+                    } else if (originalSelfProps) {
+                        selfEnt.isDeparted = originalSelfProps.isDeparted;
+                        originalSelfProps = null;
+                    }
+                }
+            }
+
+            // ---- Swap gloop positions to follow predicted player ----
+            if (hasPlayerPrediction && window.__playerRealPos && selfEnt?.hasRadioactiveGloop) {
+                const offsetX = pd.x - window.__playerRealPos.x;
+                const offsetY = pd.y - window.__playerRealPos.y;
+                const realPX = window.__playerRealPos.x;
+                const realPY = window.__playerRealPos.y;
+
+                for (const [gId, gEnt] of Object.entries(gameState.entities)) {
+                    if (gEnt.entityType !== 136) continue;
+                    if (gEnt.inactive === true) continue;
+
+                    // Only shift gloops near our real position
+                    const distToPlayer = Math.hypot(gEnt.x - realPX, gEnt.y - realPY);
+                    if (distToPlayer > 30) continue; // Only shift gloops within 30 units of the player
+
+                    __savedPositions.set('_gloop_' + gId, { ent: gEnt, x: gEnt.x, y: gEnt.y });
+                    gEnt.x += offsetX;
+                    gEnt.y += offsetY;
+                }
+            }
+
+            // ---- Enemy prediction ----
             for (const [id, ent] of Object.entries(gameState.entities)) {
-                const numericId = Number(id);
-
-                // ---- Skip player entity (handled by render hook, not preRender) ----
                 const isSelf = ent.isLocalPlayer === true || id === String(selfId);
                 if (isSelf) continue;
 
@@ -965,12 +1037,12 @@
                         state.smoothY += (idealY - state.smoothY) * lerpFactor;
                     }
 
-                    __savedPositions.set(id, { x: ent.x, y: ent.y, radius: savedRadius });
+                    __savedPositions.set(id, { ent, x: ent.x, y: ent.y, radius: savedRadius });
                     ent.x = state.smoothX;
                     ent.y = state.smoothY;
                 } else {
                     // If an enemy has stopped (e.g. frozen by ability) render it at its server position
-                    __savedPositions.set(id, { x: ent.x, y: ent.y, radius: savedRadius });
+                    __savedPositions.set(id, { ent, x: ent.x, y: ent.y, radius: savedRadius });
                     ent.x = state.serverBaseX;
                     ent.y = state.serverBaseY;
                     state.smoothX = state.serverBaseX;
@@ -990,10 +1062,8 @@
 
     window._client.postRender = (gameState) => {
         try {
-            if (!gameState?.entities) return;
-
-            for (const [id, saved] of __savedPositions) {
-                const ent = gameState.entities[id];
+            for (const [key, saved] of __savedPositions) {
+                const ent = saved.ent;
                 if (ent) {
                     ent.x = saved.x;
                     ent.y = saved.y;
@@ -1005,49 +1075,6 @@
         }
         __savedPositions.clear();
     };
-
-    function suppressGloopRenders(game) {
-        if (!game?.gameState?.entities) return;
-        for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (entity.entityType !== 136) continue;
-            if (!gloopOriginalRenders.has(id)) {
-                gloopOriginalRenders.set(id, entity.render);
-            }
-            entity.render = () => { };
-        }
-    }
-
-    function restoreGloopRenders() {
-        const game = getGameRef();
-        if (!game?.gameState?.entities) {
-            gloopOriginalRenders.clear();
-            return;
-        }
-        for (const [id, origRender] of gloopOriginalRenders) {
-            const entity = game.gameState.entities[id];
-            if (entity && typeof origRender === 'function') {
-                entity.render = origRender;
-            }
-        }
-        gloopOriginalRenders.clear();
-    }
-
-    function cacheIncomingAuras(game) {
-        if (!game?.gameState?.entities) return;
-
-        window.__gloopOffsets = [];
-        for (const [id, entity] of Object.entries(game.gameState.entities)) {
-            if (entity.entityType !== 136) continue;
-            if (entity.inactive !== true) {
-                window.__gloopOffsets.push({
-                    x: entity.x,
-                    y: entity.y,
-                    radius: entity.radius || 3,
-                    color: entity.color || '#7aff7a'
-                });
-            }
-        }
-    }
 
     // ========== OVERLAY RENDERING ==========
     function drawBalls(nativeCtx, game, camera, now) {
@@ -1067,31 +1094,6 @@
                 x: (wx - left) * scale,
                 y: (wy - top) * scale
             };
-        }
-
-        // --- Rendering Gloop pieces ---
-        if (window.__gloopOffsets && window.__gloopOffsets.length > 0) {
-            const pd = window.__predictData;
-            const predX = (pd && (now - pd.time) < 100) ? pd.x : player.x;
-            const predY = (pd && (now - pd.time) < 100) ? pd.y : player.y;
-
-            for (const piece of window.__gloopOffsets) {
-                const dx = piece.x - player.x;
-                const dy = piece.y - player.y;
-                const worldX = predX + dx;
-                const worldY = predY + dy;
-
-                const screen = worldToScreen(worldX, worldY);
-                const screenRadius = Math.max(3, piece.radius * scale);
-
-                nativeCtx.save();
-                nativeCtx.globalAlpha = 1;
-                nativeCtx.beginPath();
-                nativeCtx.arc(screen.x, screen.y, screenRadius, 0, Math.PI * 2);
-                nativeCtx.fillStyle = piece.color;
-                nativeCtx.fill();
-                nativeCtx.restore();
-            }
         }
 
         // --- Calculating screen coordinates for player overlay render ---
@@ -1136,76 +1138,13 @@
         }
     }
 
-    // ========== SYNCHRONOUS VISIBILITY MODIFIERS ==========
-    function updateSelfVisibility(game) {
-        const gameState = game?.gameState;
-        if (!gameState?.entities || !gameState.selfId) return;
-        const selfEntity = gameState.entities[gameState.selfId];
-        if (!selfEntity) return;
-        if (isHideSelfEnabled) {
-            if (!originalSelfProps) originalSelfProps = { isDeparted: selfEntity.isDeparted };
-            selfEntity.isDeparted = true;
-        } else if (originalSelfProps) {
-            selfEntity.isDeparted = originalSelfProps.isDeparted;
-            originalSelfProps = null;
-        }
-    }
-
-    // ========== PLAYER CLASS COORDINATE SUBSTITUTION HOOK ==========
-    function runPlayerRenderHook() {
-        const game = getGameRef();
-        const playerEntity = game?.player;
-        if (!playerEntity) return;
-
-        let proto = Object.getPrototypeOf(playerEntity);
-        while (proto && !proto.hasOwnProperty('render')) {
-            proto = Object.getPrototypeOf(proto);
-        }
-
-        if (proto && !proto._originalRender) {
-            proto._originalRender = proto.render;
-
-            proto.render = function (ctx, camera) {
-                const isSelf = this.isLocalPlayer === true || (window._client?.user?.self?.id && this.id === window._client.user.self.id);
-
-                if (isSelf && isPredictPlayerEnabled) {
-                    const pd = window.__predictData;
-                    const now = performance.now();
-
-                    if (pd && (now - pd.time) < 100) {
-                        const offsetX = pd.x - this.x;
-                        const offsetY = pd.y - this.y;
-
-                        const realX = this.x;
-                        const realY = this.y;
-
-                        this.x += offsetX;
-                        this.y += offsetY;
-
-                        const renderResult = this._originalRender.call(this, ctx, camera);
-
-                        this.x = realX;
-                        this.y = realY;
-
-                        return renderResult;
-                    }
-                }
-                return this._originalRender.call(this, ctx, camera);
-            };
-        }
-    }
-
     // ========== INJECTION INTO AREA (ENGINE RENDER LOOP) ==========
     function runRenderHook() {
         const game = getGameRef();
         if (!game || !game.area || !game.camera) return;
 
-        runPlayerRenderHook();
-
         if (currentArea !== game.area) {
-            restoreGloopRenders();
             currentArea = game.area;
-            window.__gloopOffsets = [];
         }
 
         if (currentArea && !currentArea._originalRender) {
@@ -1217,10 +1156,6 @@
                 if (!isOverlayEnabled) {
                     return this._originalRender.call(this, nativeCtx, cam);
                 }
-
-                cacheIncomingAuras(liveGame);
-                suppressGloopRenders(liveGame);
-                updateSelfVisibility(liveGame);
 
                 const result = this._originalRender.call(this, nativeCtx, cam);
 
@@ -1250,7 +1185,6 @@
         if (!isOverlayEnabled) {
             const game = getGameRef();
             if (game) {
-                restoreGloopRenders();
                 if (originalSelfProps && game.gameState?.entities?.[game.gameState.selfId]) {
                     game.gameState.entities[game.gameState.selfId].isDeparted = originalSelfProps.isDeparted;
                     originalSelfProps = null;
