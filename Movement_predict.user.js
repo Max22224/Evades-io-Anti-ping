@@ -193,6 +193,7 @@
                     if (!eff) continue;
                     const effType = eff.effectType ?? eff.type ?? '';
                     const effRadius = eff.radius !== undefined ? eff.radius : null;
+                    if (!effects[effType]) continue;
                     const effectName = effects[effType].name.toLowerCase();
 
                     if (effectName == 'enemy gravity') {
