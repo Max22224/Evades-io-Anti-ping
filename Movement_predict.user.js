@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movement predict
 // @namespace    https://evades.io/
-// @version      8.0.0
+// @version      8.0.1
 // @description  Prediction of player movement.
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -732,6 +732,18 @@
     function runRenderHook() {
         const game = getGameRef();
         if (!game?.area || !game?.camera) return;
+        const minimap = game.gameState.minimap;
+        if (!minimap._hooked){
+            minimap._hooked = true;
+            const originalUpdate = minimap.update;
+            minimap.update = function(e, t, r, i) {
+                originalUpdate.call(this, e, t, r, i);
+
+                if (this.entities && typeof this.entities.next === 'function') {
+                    this.entities = Array.from(this.entities);
+                }
+            };
+        }
 
         if (currentArea !== game.area) {
             currentArea = game.area;
