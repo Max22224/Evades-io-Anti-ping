@@ -513,13 +513,13 @@
                 e._evadeLastTime = now;
                 e._vxMs = 0;
                 e._vyMs = 0;
-                e._maxSpeedMs = 0;
                 e._speedMs = 0;
                 e._fx = e.x;
                 e._fy = e.y;
                 e._predX = e.x;
                 e._predY = e.y;
                 if (e.entityType === 71) {
+                    e._maxSpeedMs = 0;
                     e._clock = 0;
                     e._wallHit = false;
                     e._lastVxMs = 0;
@@ -557,7 +557,7 @@
                         e._trajValid = false;
                     } else {
                         // Store the ball's maximum speed during normal movement
-                        if (rawSpeed > 0.001) {
+                        if (e.entityType === 71 && rawSpeed > 0.001) {
                             e._maxSpeedMs = Math.max(e._maxSpeedMs || 0, rawSpeed);
                         }
 
@@ -572,7 +572,7 @@
 
                         if (isReboundingFromStop) {
                             // When exiting a stop, instantly apply full speed in the movement direction, bypassing EMA lag
-                            if (e._maxSpeedMs > 0) {
+                            if (e.entityType === 71 && e._maxSpeedMs > 0) {
                                 const h = Math.hypot(e.x - e._evadeLastPos.x, e.y - e._evadeLastPos.y);
                                 if (h > 0.001) {
                                     e._vxMs = ((e.x - e._evadeLastPos.x) / h) * e._maxSpeedMs;
