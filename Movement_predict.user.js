@@ -303,13 +303,7 @@
 
         // ================= ZONE FRICTION =================
         let zoneFriction = 0.75;
-        if (game.area && game.area.friction !== undefined) {
-            zoneFriction = game.area.friction;
-        } else if (game.gameState?.worlds && player.world !== undefined && player.area !== undefined) {
-            const currentWorld = game.gameState.worlds[player.world];
-            const currentAreaObj = currentWorld?.areas[player.area];
-            if (currentAreaObj?.friction !== undefined) zoneFriction = currentAreaObj.friction;
-        }
+        if (game.area.regionName.startsWith('Glacial Gorge')) zoneFriction = 0.15;
         if (player.slippery) zoneFriction = 0;
 
         const isDead = player.isDead || player.dead || (player.deathTimer !== undefined && player.deathTimer !== -1);
