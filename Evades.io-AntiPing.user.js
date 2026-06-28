@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades.io - Anti Ping Main
 // @namespace    https://evades.io/
-// @version      8.1.0
+// @version      9.0.0
 // @description  Anti ping for Evades.io
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -25,7 +25,6 @@
     const DEFAULT_PLAYER_RADIUS = 15;
     const PLAYER_ALPHA = 0.7;
     const SERVER_TICK_MS = 1000 / 60;
-    const _ignoredTypes = new Set([62, 72, 199, 8, 113, 228, 136]);
 
     let isOverlayEnabled = loadSetting('antiping_scripts', true);
     let isHideSelfEnabled = loadSetting('antiping_hideself', false);
@@ -43,7 +42,9 @@
         selfAcked: null,
         ping: 0,
         pingHistory: [],
-        unlockFPS: loadSetting('antiping_unlockfps', false)
+        unlockFPS: loadSetting('antiping_unlockfps', false),
+        gameEnums: {},
+        ignoredTypes: null
     });
 
     let _obs = new MutationObserver((ev) => {
@@ -66,6 +67,8 @@
             .replace(/ag\.emit\(([^)]+)\)/, (m, msgVar) => `(window._client && window._client.input && window._client.input(${msgVar}), ag.emit(${msgVar}))`)
             .replace("this.gameState.packetNumber===this.lastRenderedPacket", a => "this.gameState.packetNumber===this.lastRenderedPacket && !window._client.unlockFPS")
             .replace("this.renderer.render(this.gameState)", a => "(window._client.preRender&&window._client.preRender(this.gameState),this.renderer.render(this.gameState),window._client.postRender&&window._client.postRender(this.gameState))")
+            .replace(/;return (\w+)}\)\((\w+)\);/, ";return $1})($2);window._client.gameEnums = $2;")
+            .replace(/,(\w+)=(\w+)\((\w+)\)\.heroes\.map\((.+?)\);/, ",$1=$2($3).heroes.map($4);window._client.gameConfig = $3;")
         let nScr = document.createElement("script");
         nScr.setAttribute("type", "module");
         nScr.innerHTML = code;
@@ -167,11 +170,9 @@
         bounceSimStepMs: 12,
     };
 
-    const ENEMY_TYPE_WALL = 229;
-
     // ==================== EXTENSIBLE BALL BEHAVIOR PREDICTORS ====================
     /**
-     * Custom prediction behavior for Icicle (Type 71).
+     * Custom prediction behavior for Icicle (Type ICICLE ENEMY).
      * Handles variable frame rates (unlock_fps) safely via dynamic deltaTime.
      * @param {Object} ent - The entity object being predicted
      * @param {number} deltaTime - Time step in milliseconds
@@ -195,10 +196,6 @@
             }
         }
     }
-    // Registry mapping entityTypes to their specific client-side routines
-    const ENTITY_PREDICTORS = {
-        71: predictIcicleBehavior,
-    };
     /**
      * Core dispatcher for frame-by-frame entity behavior ticking.
      * @param {Object} ent - The entity clone being processed
@@ -207,9 +204,9 @@
     function predictEntityBehavior(ent, deltaTime) {
         if (!ent) return;
         const entType = ent.entityType ?? ent.type ?? 0;
-        const handler = ENTITY_PREDICTORS[entType];
-        if (handler) {
-            handler(ent, deltaTime);
+        const entityEnum = window._client.gameEnums.EntityType;
+        if (entType == entityEnum.ICICLE_ENEMY) {
+            predictIcicleBehavior(ent, deltaTime);
         } else {
             if (ent.speedMultiplier === undefined) {
                 ent.speedMultiplier = 1;
@@ -217,7 +214,7 @@
         }
     }
     /**
- * Custom long-term trajectory simulation for Dripping balls (Type 30).
+ * Custom long-term trajectory simulation for Dripping balls (Type DRIPPING_ENEMY).
  */
     function simulateDrippingTrajectory(e, maxTimeMs, bounceZones) {
         const stepMs = config.bounceSimStepMs || 12;
@@ -506,6 +503,7 @@
         const basePredMs = (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
         const hybridPredMs = (window.__enemySmoothPendingTicks > 0 ? window.__enemySmoothPendingTicks * SERVER_TICK_MS : basePredMs);
         const predMs = hybridPredMs;
+        const entityEnum = window._client.gameEnums.EntityType;
 
         for (const e of enemies) {
             if (!e._evadeLastPos) {
@@ -518,14 +516,14 @@
                 e._fy = e.y;
                 e._predX = e.x;
                 e._predY = e.y;
-                if (e.entityType === 71) {
+                if (e.entityType === entityEnum.ICICLE_ENEMY) {
                     e._maxSpeedMs = 0;
                     e._clock = 0;
                     e._wallHit = false;
                     e._lastVxMs = 0;
                     e._lastVyMs = 0;
                 }
-                if (e.entityType === 30) {
+                if (e.entityType === entityEnum.DRIPPING_ENEMY) {
                     e._lastRadius = e.radius;
                     e._radiusVel = 0.0075;
                     e._maxObservedRadius = 0;
@@ -557,7 +555,7 @@
                         e._trajValid = false;
                     } else {
                         // Store the ball's maximum speed during normal movement
-                        if (e.entityType === 71 && rawSpeed > 0.001) {
+                        if (e.entityType === entityEnum.ICICLE_ENEMY && rawSpeed > 0.001) {
                             e._maxSpeedMs = Math.max(e._maxSpeedMs || 0, rawSpeed);
                         }
 
@@ -572,7 +570,7 @@
 
                         if (isReboundingFromStop) {
                             // When exiting a stop, instantly apply full speed in the movement direction, bypassing EMA lag
-                            if (e.entityType === 71 && e._maxSpeedMs > 0) {
+                            if (e.entityType === entityEnum.ICICLE_ENEMY && e._maxSpeedMs > 0) {
                                 const h = Math.hypot(e.x - e._evadeLastPos.x, e.y - e._evadeLastPos.y);
                                 if (h > 0.001) {
                                     e._vxMs = ((e.x - e._evadeLastPos.x) / h) * e._maxSpeedMs;
@@ -598,7 +596,7 @@
                         }
                     }
 
-                    if (e.entityType === 30) {
+                    if (e.entityType === entityEnum.DRIPPING_ENEMY) {
                         if (e._lastRadius === undefined) e._lastRadius = e.radius;
                         const deltaR = e.radius - e._lastRadius;
 
@@ -635,7 +633,7 @@
             e._predX = e._fx + e._vxMs * predMs;
             e._predY = e._fy + e._vyMs * predMs;
 
-            if (e.entityType === 71) {
+            if (e.entityType === entityEnum.ICICLE_ENEMY) {
                 if (e._clock === undefined) e._clock = 0;
                 if (e._wallHit === undefined) e._wallHit = false;
 
@@ -728,9 +726,10 @@
     }
 
     function simulateEnemyTrajectory(e, maxTimeMs, bounceZones) {
-        if (e.entityType === ENEMY_TYPE_WALL) return simulateWallHuggingTrajectory(e, maxTimeMs, bounceZones);
-        if (e.entityType === 71) return simulateIcicleTrajectory(e, maxTimeMs, bounceZones);
-        if (e.entityType === 30) return simulateDrippingTrajectory(e, maxTimeMs, bounceZones);
+        const entityEnum = window._client.gameEnums.EntityType;
+        if (e.entityType === entityEnum.WALL_ENEMY) return simulateWallHuggingTrajectory(e, maxTimeMs, bounceZones);
+        if (e.entityType === entityEnum.ICICLE_ENEMY) return simulateIcicleTrajectory(e, maxTimeMs, bounceZones);
+        if (e.entityType === entityEnum.DRIPPING_ENEMY) return simulateDrippingTrajectory(e, maxTimeMs, bounceZones);
 
         const eR = e.radius;
         let x = e.x, y = e.y, vx = e._vxMs || 0, vy = e._vyMs || 0;
@@ -801,6 +800,7 @@
 
     function precomputeTrajectories(enemies, maxTimeMs, walkableZones) {
         const now = performance.now();
+        const entityEnum = window._client.gameEnums.EntityType;
         for (const e of enemies) {
             e._trajectory = simulateEnemyTrajectory(e, maxTimeMs, walkableZones);
             e._trajMeta = {
@@ -816,7 +816,7 @@
                 for (const z of walkableZones) {
                     if (last.x >= z.x && last.x <= z.x + z.width && last.y >= z.y && last.y <= z.y + z.height) { inAnyZone = true; break; }
                 }
-                if (!inAnyZone && e.entityType !== 234) {
+                if (!inAnyZone && e.entityType !== entityEnum.WALL_ENEMY) {
                     e._trajValid = false;
                     e._vxMs = 0; e._vyMs = 0; e._trajectory = null;
                 }
@@ -828,12 +828,14 @@
         const game = getGameRef();
         if (!game?.gameState?.entities) return;
         const gameState = game.gameState;
+        const entityEnum = window._client.gameEnums.EntityType;
+        const zonesEnum = window._client.gameEnums.ZoneType;
 
         window.__enemyPredState = window.__enemyPredState || {};
         const enemies = [];
         for (const [id, ent] of Object.entries(gameState.entities)) {
             const numericId = Number(id);
-            if (!ent.isEnemy || ent.isPlayer || ent.entityType === 130 || _ignoredTypes.has(ent.entityType)) continue;
+            if (!ent.isEnemy || ent.isPlayer || ent.entityType === entityEnum.PUMPKIN_ENEMY || window._client.ignoredTypes.has(ent.entityType)) continue;
             if ((ent.name || '').toLowerCase().includes('switch')) continue;
             if (typeof ent.x !== 'number' || typeof ent.y !== 'number' || !ent.radius) continue;
 
@@ -851,7 +853,7 @@
 
         let bounceZones = [];
         if (game.area && game.area.zones) {
-            bounceZones = game.area.zones.list().filter(z => z.type === 0);
+            bounceZones = game.area.zones.list().filter(z => z.type === zonesEnum.ACTIVE_ZONE);
         }
 
         const predMs = window.__enemySmoothPendingTicks > 0 ? window.__enemySmoothPendingTicks * SERVER_TICK_MS : (window._client.ping || 0) * 0.5 + SERVER_TICK_MS;
@@ -889,8 +891,9 @@
     window._client.preRender = (gameState) => {
         __savedPositions.clear();
         window.__playerRealPos = undefined;
-        if (!isOverlayEnabled || !gameState?.entities) return;
-
+        if (!isOverlayEnabled || !gameState?.entities || Object.keys(window._client.gameEnums).length === 0) return;
+        const entityEnum = window._client.gameEnums.EntityType;
+        if (!window._client.ignoredTypes) window._client.ignoredTypes = new Set([entityEnum.GRAVE_PROJECTILE, entityEnum.ICTOS_PROJECTILE, entityEnum.STAR_ENEMY, entityEnum.PELLET, entityEnum.WALL, entityEnum.RADIOACTIVE_GLOOP_PROJECTILE]);
         try {
             const now = performance.now();
             if (!window.__lastEnemyFrameTime) window.__lastEnemyFrameTime = now;
@@ -899,6 +902,7 @@
 
             const selfId = gameState.selfId;
             const selfEnt = gameState.entities[selfId];
+
             // ---- Update player prediction BEFORE swapping ----
             if (isPredictPlayerEnabled && window.__getSmoothCameraPrediction) {
                 const game = getGameRef();
@@ -960,7 +964,7 @@
                 const realPY = window.__playerRealPos.y;
 
                 for (const [gId, gEnt] of Object.entries(gameState.entities)) {
-                    if (gEnt.entityType !== 136) continue;
+                    if (gEnt.entityType !== entityEnum.RADIOACTIVE_GLOOP_PROJECTILE) continue;
                     if (gEnt.inactive === true) continue;
 
                     // Only shift gloops near our real position
@@ -980,7 +984,7 @@
 
                 // ---- Enemy prediction ----
                 if (!ent.isEnemy || ent.isPlayer) continue;
-                if (ent.entityType === 130 || _ignoredTypes.has(ent.entityType)) continue;
+                if (ent.entityType === entityEnum.PUMPKIN_ENEMY || window._client.ignoredTypes.has(ent.entityType)) continue;
                 if ((ent.name || '').toLowerCase().includes('switch')) continue;
 
                 const state = window.__enemyPredState ? window.__enemyPredState[id] : null;
@@ -992,9 +996,9 @@
                 const currentMultiplier = ent.speedMultiplier !== undefined ? ent.speedMultiplier : 1;
                 let hasVelocity = (Math.abs(state.vxMs) > 0.0001 || Math.abs(state.vyMs) > 0.0001) && currentMultiplier > 0;
 
-                // Force position trajectory interpolation for type 71 to simulate unfreezing correctly
-                if (ent.entityType === 71) hasVelocity = true;
-                if (ent.entityType === 30) hasVelocity = true;
+                // Force position trajectory interpolation for type ICICLE_ENEMY to simulate unfreezing correctly
+                if (ent.entityType === entityEnum.ICICLE_ENEMY) hasVelocity = true;
+                if (ent.entityType === entityEnum.DRIPPING_ENEMY) hasVelocity = true;
 
                 let savedRadius = undefined;
 
@@ -1027,7 +1031,7 @@
                     }
 
                     // Disabling lerp for dripping
-                    if (ent.entityType === 30) {
+                    if (ent.entityType === entityEnum.DRIPPING_ENEMY) {
                         state.smoothX = idealX;
                         state.smoothY = idealY;
                     } else {
@@ -1050,7 +1054,7 @@
                 }
 
                 // Icicle clock tracking on original entity
-                if (ent.entityType === 71 && ent._wallHit) {
+                if (ent.entityType === entityEnum.ICICLE_ENEMY && ent._wallHit) {
                     if (ent._clock === undefined) ent._clock = 0;
                     ent._clock += dtMs;
                 }

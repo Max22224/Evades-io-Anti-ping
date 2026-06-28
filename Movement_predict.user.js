@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movement predict
 // @namespace    https://evades.io/
-// @version      8.0.1
+// @version      9.0.0
 // @description  Prediction of player movement.
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -75,7 +75,8 @@
 
         if (e.altKey && (e.key === 'z' || e.key === 'Z' || e.code === 'KeyZ')) {
             const game = getGameRef();
-            if (game && game.player && game.player.heroType == 17) {
+            const heroesEnum = window._client.gameEnums.HeroType;
+            if (game && game.player && game.player.heroType == heroesEnum.MAGMAX) {
                 e.preventDefault();
                 isMagmaxAbilityActive = !isMagmaxAbilityActive;
             }
@@ -135,6 +136,7 @@
         const pX = futurePx ?? player.x;
         const pY = futurePy ?? player.y;
         const pRadPx = player.radius || 15;
+        const effects = window._client.gameConfig.effects;
 
         const now = performance.now();
         const dt = (now - lastAuraCheckTime) / 1000;
@@ -174,8 +176,9 @@
             const dist = Math.hypot(predictedEntX - pX, predictedEntY - pY);
 
             const entType = ent.entityType ?? ent.type ?? '';
-            let isGravity = (entType == 63);
-            let isRepelling = (entType == 142);
+            const entityEnum = window._client.gameEnums.EntityType;
+            let isGravity = (entType == entityEnum.GRAVITY_ENEMY);
+            let isRepelling = (entType == entityEnum.REPELLING_ENEMY);
             let gravityForce = (ent.gravity !== undefined) ? ent.gravity : (3);
             let repulsionForce = (ent.repulsion !== undefined) ? ent.repulsion : (3);
             let currentAuraSize = 0;
@@ -190,22 +193,23 @@
                     if (!eff) continue;
                     const effType = eff.effectType ?? eff.type ?? '';
                     const effRadius = eff.radius !== undefined ? eff.radius : null;
+                    const effectName = effects[effType].name.toLowerCase();
 
-                    if (effType == 50) {
+                    if (effectName == 'enemy gravity') {
                         isGravity = true;
                         if (effRadius) currentAuraSize = effRadius;
                         if (eff.gravity) gravityForce = eff.gravity;
-                    } else if (effType == 51) {
+                    } else if (effectName == 'enemy repelling') {
                         isRepelling = true;
                         if (effRadius) currentAuraSize = effRadius;
                         if (eff.repulsion) repulsionForce = eff.repulsion;
                     }
                     // Check first contact: player edge touches aura edge (dist <= playerRadius + effRadius)
                     if (effRadius && dist < effRadius + pRadPx) {
-                        if (effType == 48) aura.slow = Math.max(aura.slow, 0.3);
-                        else if (effType == 70) aura.slow = Math.max(aura.slow, 0.2);
-                        else if (effType == 52) aura.slow = Math.max(aura.slow, 0.85);
-                        else if (effType == 53) aura.slippery = true;
+                        if (effectName == 'enemy slowing') aura.slow = Math.max(aura.slow, 0.3);
+                        else if (effectName == 'enemy withering') aura.slow = Math.max(aura.slow, 0.2);
+                        else if (effectName == 'enemy freezing') aura.slow = Math.max(aura.slow, 0.85);
+                        else if (effectName == 'enemy slippery') aura.slippery = true;
                     }
                 }
             }
@@ -239,10 +243,11 @@
         const checkPlayerEffect = (eff) => {
             if (!eff) return;
             const effType = eff.effectType ?? eff.type ?? '';
-            if (effType == 48) aura.slow = Math.max(aura.slow, 0.3);
-            else if (effType == 70) aura.slow = Math.max(aura.slow, 0.2);
-            else if (effType == 52) aura.slow = Math.max(aura.slow, 0.85);
-            else if (effType == 53) aura.slippery = true;
+            const effectName = effects[effType].name.toLowerCase();
+            if (effType == 'enemy slowing') aura.slow = Math.max(aura.slow, 0.3);
+            else if (effectName == 'enemy withering') aura.slow = Math.max(aura.slow, 0.2);
+            else if (effectName == 'enemy freezing') aura.slow = Math.max(aura.slow, 0.85);
+            else if (effectName == 'enemy slippery') aura.slippery = true;
         };
 
         if (player.effects) {
@@ -265,9 +270,10 @@
         const areaX = game.area.x || 0;
         const areaWidth = game.area.width || 9999;
         const areaMidX = areaX + (areaWidth / 2);
+        const zonesEnum = window._client.gameEnums.ZoneType;
 
         for (const zone of zonesList) {
-            if (zone.type === 4) {
+            if (zone.type === zonesEnum.SAFE_ZONE) {
                 if (pX >= zone.x && pX <= zone.x + zone.width &&
                     pY >= zone.y && pY <= zone.y + zone.height) {
                     const isLeftSafe = zone.x < areaMidX;
@@ -290,6 +296,9 @@
         const pX = _realPos ? _realPos.x : player.x;
         const pY = _realPos ? _realPos.y : player.y;
         const camera = game?.camera;
+        const heroesEnum = window._client.gameEnums.HeroType;
+        const abilitiesEnum = window._client.gameEnums.AbilityType;
+        const zonesEnum = window._client.gameEnums.ZoneType;
 
         // ================= ZONE FRICTION =================
         let zoneFriction = 0.75;
@@ -330,9 +339,10 @@
             if (!ent || ent === player) return;
 
             const entType = ent.entityType;
+            const entityEnum = window._client.gameEnums.EntityType;
 
-            const isPoisonGhost = (entType == 120);
-            const isPoisonSniper = (entType == 121 || entType == 122);
+            const isPoisonGhost = (entType == entityEnum.POISON_GHOST_ENEMY);
+            const isPoisonSniper = (entType == entityEnum.POISON_SNIPER_ENEMY || entType == entityEnum.POISON_SNIPER_PROJECTILE);
 
             if (isPoisonGhost || isPoisonSniper) {
                 const entX = ent.x;
@@ -357,21 +367,21 @@
         if (maxPoisonTicks > 0) rawBaseSpeed *= 3;
 
         let additionalSpeed = 0;
-        if (player.mutatiorbBuffSpeedBoost === true) additionalSpeed += (player.heroType == 10) ? 90 : 60;
+        if (player.mutatiorbBuffSpeedBoost === true) additionalSpeed += (player.heroType == heroesEnum.FACTORB) ? 90 : 60;
         if (player.sweetToothConsumed === true) additionalSpeed += 150;
 
-        if (player.heroType == 17 && isMagmaxAbilityActive) {
+        if (player.heroType == heroesEnum.MAGMAX && isMagmaxAbilityActive) {
             const ab1 = player.abilityOne;
-            if (ab1 && (ab1.abilityType == 28 || ab1.type == 28) && ab1.level >= 1) {
+            if (ab1 && (ab1.abilityType == abilitiesEnum.FLOW || ab1.type == abilitiesEnum.FLOW) && ab1.level >= 1) {
                 const magmaxSpeeds = [60, 90, 120, 150, 180];
                 additionalSpeed += magmaxSpeeds[Math.min(ab1.level - 1, 4)];
             }
         }
 
         const isNightActive = !!(player.nightActivated || player.abilityOne?.nightActivated || player.night);
-        if (isNightActive) {
+        if (player.heroType == heroesEnum.SHADE && isNightActive) {
             const ab1 = player.abilityOne;
-            if (ab1 && (ab1.abilityType == 59 || ab1.type == 59)) {
+            if (ab1 && (ab1.abilityType == abilitiesEnum.NIGHT || ab1.type == abilitiesEnum.NIGHT)) {
                 const lvl = ab1.level ?? 0;
                 if (lvl >= 1) {
                     const shadeSpeeds = [0, 37.5, 75, 112.5, 150];
@@ -385,7 +395,7 @@
 
         const ab2 = player.abilityTwo;
         let isStickyActive = false;
-        if (ab2 && ab2.abilityType == 98 && ab2.locked === false && ab2.level === 1 && !player.isStickyCoatDisabled) {
+        if (ab2 && ab2.abilityType == abilitiesEnum.STICKY_COAT && ab2.locked === false && ab2.level === 1 && !player.isStickyCoatDisabled) {
             try {
                 const entitiesList = game.entities || game.gameState?.entities;
                 if (entitiesList) {
@@ -512,7 +522,7 @@
                 baseSpeed = 0;
             } else {
                 let slowReduction = 0;
-                if (player.mutatiorbBuffEffectsReduction === true) slowReduction = (player.heroType == 10) ? 0.60 : 0.40;
+                if (player.mutatiorbBuffEffectsReduction === true) slowReduction = (player.heroType == heroesEnum.FACTORB) ? 0.60 : 0.40;
                 effectiveSlow = aura.slow * (1 - slowReduction);
                 baseSpeed *= (1 - Math.min(1, Math.max(0, effectiveSlow)));
             }
@@ -590,7 +600,7 @@
             let walkableZones = [];
             if (game.area.zones) {
                 // Only consider walkable zone types (0=active, 2=exit (area switches (area 1->2)), 4=safe, 5=teleport (map switches), 6=victory) for player boundary logic
-                const _walkableTypeSet = new Set([0, 4, 6]);
+                const _walkableTypeSet = new Set([zonesEnum.ACTIVE_ZONE, zonesEnum.SAFE_ZONE, zonesEnum.VICTORY_ZONE]);
                 rawZones = game.area.zones.list();
                 walkableZones = rawZones.filter(z => _walkableTypeSet.has(z.type));
             }
